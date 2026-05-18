@@ -31,6 +31,26 @@ class HomePage {
 
         pageHome.innerHTML = `
             <div class="dashboard-content" id="home-content">
+                <section class="dashboard-section" id="recent-channels-section">
+                    <div class="section-header">
+                        <h2>Recently Watched</h2>
+                    </div>
+                    <div class="scroll-wrapper">
+                        <button class="scroll-arrow scroll-left" aria-label="Scroll left">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                        </button>
+                        <div class="horizontal-scroll channel-tiles" id="recent-channels-list">
+                            <div class="loading-state">
+                                <div class="loading"></div>
+                                <span>Loading recently watched...</span>
+                            </div>
+                        </div>
+                        <button class="scroll-arrow scroll-right" aria-label="Scroll right">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                        </button>
+                    </div>
+                </section>
+
                 <section class="dashboard-section" id="favorite-channels-section">
                     <div class="section-header">
                         <h2>Favorite Channels</h2>
@@ -170,11 +190,14 @@ class HomePage {
         this.isLoading = true;
 
         try {
-            // 0. Load Favorite Channels (first section)
+            // 0. Recently watched channels (top section — cached, loads fast)
+            await this.renderRecentChannels();
+
+            // 1. Load Favorite Channels
             await this.renderFavoriteChannels();
 
             // 1. Load Watch History
-            const history = await window.API.request('GET', '/history?limit=12');
+            const history = await window.API.request('GET', '/history?limit=12&excludeType=live');
             if (history && Array.isArray(history)) {
                 this.renderHistory(history);
             }
@@ -187,6 +210,40 @@ class HomePage {
             console.error('[Dashboard] Error loading data:', err);
         } finally {
             this.isLoading = false;
+        }
+    }
+
+    async renderRecentChannels() {
+        const list = document.getElementById('recent-channels-list');
+        const section = document.getElementById('recent-channels-section');
+        if (!list || !section) return;
+
+        try {
+            const channels = await window.API.request('GET', '/history/channels?limit=10');
+
+            if (!channels || channels.length === 0) {
+                section.classList.add('hidden');
+                return;
+            }
+
+            section.classList.remove('hidden');
+            list.innerHTML = channels.map(ch => this.createChannelTile({
+                id: ch.item_id,
+                sourceId: ch.source_id,
+                tvgLogo: ch.stream_icon,
+                name: ch.name
+            })).join('');
+
+            list.querySelectorAll('.channel-tile').forEach(tile => {
+                tile.addEventListener('click', () => {
+                    this.playChannel(tile.dataset.channelId, tile.dataset.sourceId);
+                });
+            });
+
+            this.updateScrollArrows();
+        } catch (err) {
+            console.error('[Dashboard] Error loading recent channels:', err);
+            section.classList.add('hidden');
         }
     }
 

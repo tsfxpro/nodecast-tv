@@ -23,6 +23,7 @@ class ChannelList {
         this.sources = [];
         this.isLoading = false;
         this.renderedChannels = [];
+        this.liveHistoryTimer = null;
 
         this.loadCollapsedState();
         this.init();
@@ -1169,6 +1170,25 @@ class ChannelList {
         // Play channel
         if (window.app?.player) {
             window.app.player.play(channel, streamUrl);
+        }
+
+        // Record to watch history after 10s — cancels if the user switches before then
+        clearTimeout(this.liveHistoryTimer);
+        this.liveHistoryTimer = setTimeout(() => this.saveLiveHistory(channel), 10000);
+    }
+
+    async saveLiveHistory(channel) {
+        try {
+            await window.API.request('POST', '/history', {
+                id: channel.streamId || channel.id,
+                type: 'live',
+                sourceId: channel.sourceId,
+                progress: 0,
+                duration: 0,
+                data: { title: channel.name, poster: channel.tvgLogo || null }
+            });
+        } catch (err) {
+            console.warn('[History] Failed to save live channel history:', err);
         }
     }
 

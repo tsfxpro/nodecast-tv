@@ -6,6 +6,59 @@ const { requireAuth } = require('../auth');
 // Middleware to ensure authentication
 router.use(requireAuth);
 
+// Per-user cache for recently watched channels
+const CHANNELS_CACHE_TTL = 25 * 60 * 60 * 1000; // 25h — invalidated immediately on each watch, TTL is just a safety net
+const recentChannelsCache = new Map();
+
+function queryRecentChannels(userId, limit) {
+    return getDb().prepare(`
+        SELECT wh.item_id, wh.source_id, wh.updated_at,
+               pi.name, pi.stream_icon
+        FROM watch_history wh
+        LEFT JOIN playlist_items pi
+            ON  pi.item_id   = wh.item_id
+            AND pi.source_id = wh.source_id
+            AND pi.type      = 'live'
+        WHERE wh.user_id = ? AND wh.item_type = 'live'
+        ORDER BY wh.updated_at DESC
+        LIMIT ?
+    `).all(userId, limit);
+}
+
+function warmChannelsCache() {
+    try {
+        const db = getDb();
+        const users = db.prepare(`SELECT DISTINCT user_id FROM watch_history WHERE item_type = 'live'`).all();
+        for (const { user_id } of users) {
+            recentChannelsCache.set(user_id, { data: queryRecentChannels(user_id, 10), timestamp: Date.now() });
+        }
+        console.log(`[Cache] Recent channels cache warmed for ${users.length} user(s)`);
+    } catch (err) {
+        console.error('[Cache] Recent channels cache warm failed:', err.message);
+    }
+}
+
+/**
+ * GET /api/history/channels
+ * Returns the 10 most recently watched live channels for the authenticated user
+ */
+router.get('/channels', (req, res) => {
+    try {
+        const userId = req.user.id;
+        const limit = parseInt(req.query.limit) || 10;
+        const entry = recentChannelsCache.get(userId);
+        if (entry && (Date.now() - entry.timestamp) < CHANNELS_CACHE_TTL) {
+            return res.json(entry.data);
+        }
+        const rows = queryRecentChannels(userId, limit);
+        recentChannelsCache.set(userId, { data: rows, timestamp: Date.now() });
+        res.json(rows);
+    } catch (err) {
+        console.error('[History] Error fetching recent channels:', err);
+        res.status(500).json({ error: 'Failed to fetch recent channels' });
+    }
+});
+
 /**
  * GET /api/history
  * Returns the watch history for the authenticated user
@@ -16,12 +69,10 @@ router.get('/', (req, res) => {
         const userId = req.user.id;
         const limit = parseInt(req.query.limit) || 20;
 
-        const rows = db.prepare(`
-            SELECT * FROM watch_history 
-            WHERE user_id = ? 
-            ORDER BY updated_at DESC 
-            LIMIT ?
-        `).all(userId, limit);
+        const excludeType = req.query.excludeType;
+        const rows = excludeType
+            ? db.prepare(`SELECT * FROM watch_history WHERE user_id = ? AND item_type != ? ORDER BY updated_at DESC LIMIT ?`).all(userId, excludeType, limit)
+            : db.prepare(`SELECT * FROM watch_history WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?`).all(userId, limit);
 
         const history = rows.map(row => ({
             ...row,
@@ -76,6 +127,7 @@ router.post('/', (req, res) => {
             JSON.stringify(data || {})
         );
 
+        if (type === 'live') recentChannelsCache.delete(userId);
         res.json({ success: true, timestamp });
     } catch (err) {
         console.error('[History] Error saving progress:', err);
@@ -110,3 +162,4 @@ router.delete('/:itemId', (req, res) => {
 });
 
 module.exports = router;
+module.exports.warmChannelsCache = warmChannelsCache;

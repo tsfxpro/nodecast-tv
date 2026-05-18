@@ -183,7 +183,8 @@ app.use('/api/remux', require('./routes/remux'));
 app.use('/api/probe', require('./routes/probe'));
 app.use('/api/subtitle', require('./routes/subtitle'));
 app.use('/api/settings', require('./routes/settings'));
-app.use('/api/history', require('./routes/history'));
+const historyRouter = require('./routes/history');
+app.use('/api/history', historyRouter);
 
 // Version endpoint
 app.get('/api/version', (req, res) => {
@@ -213,11 +214,13 @@ app.listen(PORT, async () => {
     // Warm DB cache from existing data immediately (before sync)
     proxyRouter.warmDbCache().catch(err => console.warn('[Cache] Startup warm failed:', err.message));
     channelsRouter.warmRecentCache();
+    historyRouter.warmChannelsCache();
 
     // Re-warm DB cache after every sync cycle (timer-driven or manual)
     syncService.onSyncComplete(() => {
         proxyRouter.warmDbCache();
         channelsRouter.warmRecentCache();
+        historyRouter.warmChannelsCache();
     });
 
     // Start sync timer after server settles.
