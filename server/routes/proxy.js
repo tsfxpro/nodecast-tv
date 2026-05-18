@@ -16,8 +16,9 @@ const { Readable } = require('stream');
 // Default cache max age in hours
 const DEFAULT_MAX_AGE_HOURS = 24;
 
-// Short TTL for local DB queries (data changes only on 24h sync cycles)
-const DB_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// DB cache lives for 25h — data only changes on 24h sync cycles.
+// Cache is refreshed immediately after each sync via warmDbCache().
+const DB_CACHE_TTL = 25 * 60 * 60 * 1000; // 25 hours
 
 // Helper to get formatted category list from DB
 function getCategoriesFromDb(sourceId, type, includeHidden = false) {
@@ -847,4 +848,31 @@ router.get('/image', async (req, res) => {
     }
 });
 
+/**
+ * Pre-populate DB cache for all enabled sources.
+ * Call on startup and after each sync cycle.
+ */
+async function warmDbCache() {
+    try {
+        const allSources = await sources.getAll();
+        const enabled = allSources.filter(s => s.enabled);
+        for (const source of enabled) {
+            const sid = source.id;
+            for (const includeHidden of [false, true]) {
+                const h = String(includeHidden);
+                cache.set('xtream', sid, `db_live_cat_${h}`,            getCategoriesFromDb(sid, 'live',   includeHidden));
+                cache.set('xtream', sid, `db_live_streams_all_${h}`,    getStreamsFromDb(sid, 'live',   null, includeHidden));
+                cache.set('xtream', sid, `db_vod_cat_${h}`,             getCategoriesFromDb(sid, 'movie',  includeHidden));
+                cache.set('xtream', sid, `db_vod_streams_all_${h}`,     getStreamsFromDb(sid, 'movie',  null, includeHidden));
+                cache.set('xtream', sid, `db_series_cat_${h}`,          getCategoriesFromDb(sid, 'series', includeHidden));
+                cache.set('xtream', sid, `db_series_streams_all_${h}`,  getStreamsFromDb(sid, 'series', null, includeHidden));
+            }
+        }
+        console.log(`[Cache] DB cache warmed for ${enabled.length} source(s)`);
+    } catch (err) {
+        console.error('[Cache] DB cache warm failed:', err.message);
+    }
+}
+
 module.exports = router;
+module.exports.warmDbCache = warmDbCache;

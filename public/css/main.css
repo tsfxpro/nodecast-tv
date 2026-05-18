@@ -1141,6 +1141,11 @@ video::cue {
   text-overflow: ellipsis;
 }
 
+.epg-channel-info:hover .epg-channel-name {
+  white-space: normal;
+  overflow: visible;
+}
+
 .epg-programs {
   display: flex;
   flex: 1;
@@ -4700,12 +4705,28 @@ kbd {
   transform: translateY(-5px);
   box-shadow: var(--shadow-lg);
   border-color: var(--color-accent-dim);
+  overflow: visible;
+  z-index: 10;
+}
+
+.dashboard-card:hover .card-info {
+  position: relative;
+  z-index: 10;
+  background: var(--color-surface);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+
+.dashboard-card:hover .card-title {
+  white-space: normal;
+  overflow: visible;
 }
 
 .card-image {
   position: relative;
   aspect-ratio: 2/3;
   overflow: hidden;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .card-image img {
@@ -4804,11 +4825,13 @@ kbd {
   border-radius: var(--radius-md);
   transition: transform var(--transition-fast), background var(--transition-fast);
   scroll-snap-align: start;
+  position: relative;
 }
 
 .channel-tile:hover {
   transform: translateY(-4px);
   background: rgba(255, 255, 255, 0.05);
+  z-index: 10;
 }
 
 .tile-logo {
@@ -4849,6 +4872,8 @@ kbd {
 
 .channel-tile:hover .tile-name {
   color: var(--color-text-bright);
+  white-space: normal;
+  overflow: visible;
 }
 
 /* Responsive: smaller tiles on mobile */
