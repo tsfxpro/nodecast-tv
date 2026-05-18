@@ -63,6 +63,7 @@ class TranscodeSession extends EventEmitter {
         this.segments = new Map(); // segment index -> { ready: boolean, path: string }
         this.status = 'pending'; // pending | starting | running | stopped | error
         this.error = null;
+        this.sourceDuration = 0; // parsed from ffmpeg stderr once demux analysis runs
         this.startTime = Date.now();
         this.lastAccess = Date.now();
         this.options = {
@@ -122,11 +123,19 @@ class TranscodeSession extends EventEmitter {
             let stderrBuffer = '';
             this.process.stderr.on('data', (data) => {
                 stderrBuffer += data.toString();
-                // Log periodically to avoid spam
                 const lines = stderrBuffer.split('\n');
                 if (lines.length > 1) {
                     lines.slice(0, -1).forEach(line => {
-                        if (line.trim()) {
+                        // Parse source duration from ffmpeg's demux analysis (emitted once at startup)
+                        if (!this.sourceDuration) {
+                            const m = line.match(/Duration:\s+(\d+):(\d+):(\d+)\.(\d+)/);
+                            if (m) {
+                                this.sourceDuration = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3] + '.' + m[4]);
+                                console.log(`[TranscodeSession ${this.id}] Source duration: ${this.sourceDuration}s`);
+                            }
+                        }
+                        // Suppress per-segment file-open noise from the HLS muxer; log everything else
+                        if (line.trim() && !line.includes("Opening '")) {
                             console.log(`[FFmpeg ${this.id}] ${line}`);
                         }
                     });
@@ -183,7 +192,7 @@ class TranscodeSession extends EventEmitter {
 
         const args = [
             '-hide_banner',
-            '-loglevel', 'warning',
+            '-loglevel', 'info',
             '-user_agent', this.options.userAgent,
         ];
 
@@ -564,6 +573,21 @@ class TranscodeSession extends EventEmitter {
     }
 
     /**
+     * Wait for sourceDuration to be parsed from ffmpeg stderr (typically <2s).
+     * Falls back to waiting for the real playlist if duration never arrives.
+     */
+    async waitForDuration(timeoutMs = 10000) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (this.sourceDuration > 0) return true;
+            if (this.status === 'error') return false;
+            await new Promise(r => setTimeout(r, 100));
+        }
+        // Fallback: if no duration parsed yet, accept the real playlist if it appeared
+        return this.isPlaylistReady();
+    }
+
+    /**
      * Get the HLS playlist content
      */
     async getPlaylist() {
@@ -573,6 +597,41 @@ class TranscodeSession extends EventEmitter {
         } catch (err) {
             return null;
         }
+    }
+
+    /**
+     * Serve a virtual VOD playlist built from sourceDuration.
+     * HLS.js sees #EXT-X-PLAYLIST-TYPE:VOD + #EXT-X-ENDLIST and starts from
+     * seg0000 instead of jumping to the live edge.
+     * Falls back to the real playlist when duration is not yet known.
+     */
+    async getVirtualPlaylist() {
+        this.touch();
+        if (!this.sourceDuration) {
+            return this.getPlaylist();
+        }
+
+        const segCount = Math.ceil(this.sourceDuration / SEGMENT_DURATION);
+        const lines = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            `#EXT-X-TARGETDURATION:${SEGMENT_DURATION}`,
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+            '#EXT-X-MEDIA-SEQUENCE:0'
+        ];
+
+        for (let i = 0; i < segCount; i++) {
+            const segName = `seg${String(i).padStart(4, '0')}.ts`;
+            const isLast = i === segCount - 1;
+            const segDur = isLast
+                ? (this.sourceDuration - i * SEGMENT_DURATION).toFixed(3)
+                : `${SEGMENT_DURATION}.000`;
+            lines.push(`#EXTINF:${segDur},`);
+            lines.push(segName);
+        }
+
+        lines.push('#EXT-X-ENDLIST');
+        return lines.join('\n');
     }
 
     /**
@@ -587,6 +646,28 @@ class TranscodeSession extends EventEmitter {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * Wait for a segment to be written by ffmpeg (up to timeoutMs).
+     * Called when the browser requests a segment that hasn't been encoded yet.
+     */
+    async waitForSegment(segmentName, timeoutMs = 30000) {
+        this.touch();
+        const segPath = path.join(this.dir, segmentName);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            try {
+                await fs.access(segPath);
+                return segPath;
+            } catch {
+                if (this.status === 'stopped' || this.status === 'error') {
+                    return null; // ffmpeg is done, segment won't appear
+                }
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+        return null;
     }
 
     /**
@@ -707,6 +788,35 @@ async function cleanupStaleSessions() {
 }
 
 /**
+ * Delete all transcode cache directories that have no running session.
+ * Called at startup: orphaned dirs from before a server restart can never
+ * resume (their ffmpeg processes are dead), so we clean them immediately
+ * rather than waiting for the 30-minute idle timeout.
+ */
+async function cleanupOrphanedDirectories() {
+    try {
+        await fs.access(CACHE_DIR);
+        const dirs = await fs.readdir(CACHE_DIR, { withFileTypes: true });
+        const activeIds = new Set(Array.from(sessions.keys()));
+        for (const dirent of dirs) {
+            if (dirent.isDirectory() && !activeIds.has(dirent.name)) {
+                const orphanPath = path.join(CACHE_DIR, dirent.name);
+                try {
+                    await fs.rm(orphanPath, { recursive: true, force: true });
+                    console.log(`[TranscodeSession] Removed orphaned dir: ${dirent.name}`);
+                } catch (e) {
+                    console.error(`[TranscodeSession] Failed to remove ${dirent.name}:`, e.message);
+                }
+            }
+        }
+    } catch (err) {
+        if (err.code !== 'ENOENT') {
+            console.error('[TranscodeSession] Error during orphan cleanup:', err.message);
+        }
+    }
+}
+
+/**
  * Recover sessions from disk after server restart
  */
 async function recoverSessions() {
@@ -764,6 +874,7 @@ module.exports = {
     getOrCreateSession,
     removeSession,
     cleanupStaleSessions,
+    cleanupOrphanedDirectories,
     recoverSessions,
     startCleanupInterval,
     getAllSessions,

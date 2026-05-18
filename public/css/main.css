@@ -659,6 +659,12 @@ h4 {
   text-overflow: ellipsis;
 }
 
+.channel-item:hover .channel-name {
+  white-space: normal;
+  overflow: visible;
+  word-break: break-word;
+}
+
 .channel-program {
   font-size: 0.75rem;
   color: var(--color-text-muted);
@@ -2457,6 +2463,11 @@ kbd {
   .movie-title,
   .series-title {
     font-size: 0.8rem;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .movie-meta,
@@ -2886,6 +2897,21 @@ kbd {
 .movie-card:hover {
   transform: translateY(-4px);
   box-shadow: var(--shadow-lg);
+  overflow: visible;
+  z-index: 10;
+}
+
+.movie-card:hover .movie-info {
+  position: relative;
+  z-index: 10;
+  background: var(--color-bg-tertiary);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+
+.movie-card:hover .movie-title {
+  white-space: normal;
+  overflow: visible;
 }
 
 .movie-poster {
@@ -2895,6 +2921,7 @@ kbd {
   /* 2:3 ratio (160 * 1.5 = 240) */
   background: var(--color-bg-primary);
   overflow: hidden;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
 .movie-poster img {
@@ -3026,6 +3053,21 @@ kbd {
 .series-card:hover {
   transform: translateY(-4px);
   box-shadow: var(--shadow-lg);
+  overflow: visible;
+  z-index: 10;
+}
+
+.series-card:hover .series-card-info {
+  position: relative;
+  z-index: 10;
+  background: var(--color-bg-tertiary);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+
+.series-card:hover .series-title {
+  white-space: normal;
+  overflow: visible;
 }
 
 .series-poster,
@@ -3035,6 +3077,7 @@ kbd {
   height: 240px;
   background: var(--color-bg-primary);
   overflow: hidden;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
 .series-poster img,
@@ -4230,6 +4273,11 @@ kbd {
   background: rgba(156, 39, 176, 0.8);
   /* Purple for Upscaling */
   box-shadow: 0 0 10px rgba(156, 39, 176, 0.4);
+}
+
+.transcode-status.ready {
+  background: rgba(76, 175, 80, 0.8);
+  /* Green: transcoding/remux session is running and playing OK */
 }
 
 .transcode-status.hidden {

@@ -20,8 +20,9 @@ const transcodeSession = require('../services/transcodeSession');
  *   GET /api/transcode/sessions        - List all sessions (debug)
  */
 
-// Start session cleanup interval
+// Start session cleanup interval and remove orphaned dirs from before last restart
 transcodeSession.startCleanupInterval();
+transcodeSession.cleanupOrphanedDirectories();
 
 /**
  * Create a new transcode session
@@ -60,8 +61,8 @@ router.post('/session', async (req, res) => {
 
         await session.start();
 
-        // Wait for playlist to be ready (first segments generated)
-        const ready = await session.waitForPlaylist(15000);
+        // Wait for duration to be parsed from ffmpeg stderr (~1-2s, much faster than first segment)
+        const ready = await session.waitForDuration(15000);
 
         if (!ready) {
             await transcodeSession.removeSession(session.id);
@@ -71,7 +72,8 @@ router.post('/session', async (req, res) => {
         res.json({
             sessionId: session.id,
             playlistUrl: `/api/transcode/${session.id}/stream.m3u8`,
-            status: session.status
+            status: session.status,
+            duration: session.sourceDuration || 0
         });
 
     } catch (err) {
@@ -92,7 +94,7 @@ router.get('/:sessionId/stream.m3u8', async (req, res) => {
         return res.status(404).json({ error: 'Session not found' });
     }
 
-    const playlist = await session.getPlaylist();
+    const playlist = await session.getVirtualPlaylist();
     if (!playlist) {
         return res.status(404).json({ error: 'Playlist not ready' });
     }
@@ -119,7 +121,11 @@ router.get('/:sessionId/:segment', async (req, res) => {
         return res.status(404).json({ error: 'Session not found' });
     }
 
-    const segmentPath = await session.getSegment(segment);
+    // Segment may not exist yet if ffmpeg hasn't reached it — wait up to 30s
+    let segmentPath = await session.getSegment(segment);
+    if (!segmentPath) {
+        segmentPath = await session.waitForSegment(segment, 30000);
+    }
     if (!segmentPath) {
         return res.status(404).json({ error: 'Segment not found' });
     }

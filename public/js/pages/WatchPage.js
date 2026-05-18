@@ -94,6 +94,14 @@ class WatchPage {
         // Watch history
         this.historyInterval = null;
 
+        // VOD seek state (not used for live streams — WatchPage is VOD-only)
+        this.knownDuration = 0;       // source duration from probe
+        this.currentSeekOffset = 0;   // seekOffset the current HLS session started at
+        this.isHlsSession = false;    // true when playing via a transcode session
+        this._sessionOptions = null;  // options used to start the session (for restart on seek)
+        this._seekTimer = null;       // debounce timer for out-of-buffer seeks
+        this.isDraggingProgress = false;
+
         this.init();
     }
 
@@ -179,7 +187,11 @@ class WatchPage {
             }
         });
 
-        // Progress bar
+        // Progress bar — track drag so updateProgress() doesn't fight the slider
+        this.progressSlider?.addEventListener('mousedown', () => { this.isDraggingProgress = true; });
+        this.progressSlider?.addEventListener('touchstart', () => { this.isDraggingProgress = true; }, { passive: true });
+        this.progressSlider?.addEventListener('mouseup', () => { this.isDraggingProgress = false; });
+        this.progressSlider?.addEventListener('touchend', () => { this.isDraggingProgress = false; });
         this.progressSlider?.addEventListener('input', (e) => this.seek(e.target.value));
 
         // Video events
@@ -327,6 +339,14 @@ class WatchPage {
      * Start a HLS transcode session
      */
     async startTranscodeSession(url, options = {}) {
+        // Track VOD session state for seek support
+        const effectiveSeekOffset = options.seekOffset ?? this.resumeTime ?? 0;
+        this.isHlsSession = true;
+        this.currentSeekOffset = effectiveSeekOffset;
+        // Save options (minus seekOffset) so _restartSessionAt() can reuse them
+        const { seekOffset: _dropped, ...coreOptions } = options;
+        this._sessionOptions = coreOptions;
+
         try {
             console.log('[WatchPage] Starting HLS transcode session...', options);
             const res = await fetch('/api/transcode/session', {
@@ -334,17 +354,23 @@ class WatchPage {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     url,
-                    seekOffset: this.resumeTime, // Pass resume point to backend
+                    seekOffset: this.resumeTime,
                     ...options
                 })
             });
             if (!res.ok) throw new Error('Failed to start session');
             const session = await res.json();
             this.currentSessionId = session.sessionId;
+            // Use session-reported duration when probe returned 0 (common for Xtream MKV)
+            if (session.duration > 0 && this.knownDuration === 0) {
+                this.knownDuration = session.duration;
+                if (this.timeTotal) this.timeTotal.textContent = this.formatTime(session.duration);
+                console.log('[WatchPage] Got duration from transcode session:', session.duration);
+            }
             return session.playlistUrl;
         } catch (err) {
             console.error('[WatchPage] Session start failed:', err);
-            // Fallback to direct transcode if session fails
+            this.isHlsSession = false;
             return `/api/transcode?url=${encodeURIComponent(url)}`;
         }
     }
@@ -410,8 +436,15 @@ class WatchPage {
     }
 
     async loadVideo(url) {
-        // Store the URL for copy functionality
+        // Store the URL for copy functionality and for session restarts
         this.currentUrl = url;
+
+        // Reset VOD seek state for each new video
+        this.knownDuration = 0;
+        this.currentSeekOffset = 0;
+        this.isHlsSession = false;
+        this._sessionOptions = null;
+        clearTimeout(this._seekTimer);
 
         // Stop any existing playback
         this.stop();
@@ -439,11 +472,17 @@ class WatchPage {
                 const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
                 const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}`);
                 const info = await probeRes.json();
-                console.log(`[WatchPage] Probe result: video=${info.video}, audio=${info.audio}, ${info.width}x${info.height}, compatible=${info.compatible}`);
+                console.log(`[WatchPage] Probe result: video=${info.video}, audio=${info.audio}, ${info.width}x${info.height}, compatible=${info.compatible}, duration=${info.duration}`);
 
                 // Store early probe info for quality display
                 this.currentStreamInfo = info;
                 this.updateQualityBadge();
+
+                // Store source duration so the progress bar works before video.duration is known
+                if (info.duration > 0) {
+                    this.knownDuration = info.duration;
+                    if (this.timeTotal) this.timeTotal.textContent = this.formatTime(info.duration);
+                }
 
                 if (info.needsTranscode || settings.upscaleEnabled) {
                     console.log(`[WatchPage] Auto: Using HLS transcode session (${settings.upscaleEnabled ? 'Upscaling' : 'Incompatible audio/video'})`);
@@ -512,6 +551,10 @@ class WatchPage {
                 const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}`);
                 const info = await probeRes.json();
                 videoCodec = info.video;
+                if (info.duration > 0) {
+                    this.knownDuration = info.duration;
+                    if (this.timeTotal) this.timeTotal.textContent = this.formatTime(info.duration);
+                }
             } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
 
             const playlistUrl = await this.startTranscodeSession(url, {
@@ -569,8 +612,9 @@ class WatchPage {
         }
 
         this.hls = new Hls({
-            maxBufferLength: 30,
-            maxMaxBufferLength: 60,
+            maxBufferLength: 60,
+            maxMaxBufferLength: 120,
+            maxBufferSize: 100 * 1024 * 1024, // 100 MB
             startLevel: -1,
             enableWorker: true,
         });
@@ -625,6 +669,12 @@ class WatchPage {
         this.stopTranscodeSession();
         this.updateTranscodeStatus('hidden');
 
+        // Reset VOD seek state
+        this.isHlsSession = false;
+        this.currentSeekOffset = 0;
+        this.isDraggingProgress = false;
+        clearTimeout(this._seekTimer);
+
         // Hide quality badge
         this.currentStreamInfo = null;
         if (this.qualityBadgeEl) {
@@ -637,7 +687,7 @@ class WatchPage {
         }
         if (this.video) {
             this.video.pause();
-            this.video.src = '';
+            this.video.removeAttribute('src');
             this.video.load();
         }
 
@@ -661,9 +711,51 @@ class WatchPage {
     }
 
     seek(percent) {
-        if (this.video && this.video.duration) {
-            this.video.currentTime = (percent / 100) * this.video.duration;
+        if (!this.video) return;
+        const totalDuration = isFinite(this.video.duration) ? this.video.duration : this.knownDuration;
+        if (!totalDuration) return;
+
+        const targetTime = (percent / 100) * totalDuration;
+
+        if (this.isHlsSession) {
+            const sessionRelativeTime = targetTime - this.currentSeekOffset;
+            // Check whether the target falls within the already-transcoded + buffered range
+            let withinBuffer = false;
+            if (sessionRelativeTime >= 0 && this.video.buffered.length > 0) {
+                const bufEnd = this.video.buffered.end(this.video.buffered.length - 1);
+                withinBuffer = sessionRelativeTime <= bufEnd + 5; // 5 s tolerance
+            }
+
+            if (withinBuffer) {
+                clearTimeout(this._seekTimer);
+                this.video.currentTime = sessionRelativeTime;
+            } else {
+                // Debounce so dragging quickly doesn't spawn a session per pixel
+                clearTimeout(this._seekTimer);
+                this._seekTimer = setTimeout(() => this._restartSessionAt(targetTime), 400);
+            }
+        } else {
+            this.video.currentTime = targetTime;
         }
+    }
+
+    /**
+     * Restart the current HLS transcode session starting at a new absolute source offset.
+     * Only called from seek() when the target is beyond the buffered range.
+     */
+    async _restartSessionAt(targetTime) {
+        if (!this.content || !this.currentUrl) return;
+        console.log(`[WatchPage] Restarting session at ${targetTime}s`);
+
+        await this.stopTranscodeSession();
+        if (this.hls) { this.hls.destroy(); this.hls = null; }
+        this.showLoading();
+
+        // Reuse the same codec/mode options but with the new seek offset
+        const options = { ...(this._sessionOptions || {}), seekOffset: targetTime };
+        this.resumeTime = targetTime; // keeps startTranscodeSession consistent
+        const playlistUrl = await this.startTranscodeSession(this.currentUrl, options);
+        this.playHls(playlistUrl);
     }
 
     toggleMute() {
@@ -768,25 +860,29 @@ class WatchPage {
     // === UI Updates ===
 
     updateProgress() {
-        if (!this.video || !this.video.duration) return;
+        if (!this.video || this.isDraggingProgress) return;
 
-        const percent = (this.video.currentTime / this.video.duration) * 100;
-        this.progressSlider.value = percent;
-        this.timeCurrent.textContent = this.formatTime(this.video.currentTime);
+        // Use probe-derived duration when video.duration is not yet finite (HLS live-type playlist)
+        const totalDuration = isFinite(this.video.duration) ? this.video.duration : this.knownDuration;
+        if (!totalDuration) return;
 
-        // Show "Up Next" panel early for series (like streaming services do during credits)
-        // Only show if auto-play next episode is enabled
+        // For HLS sessions the stream starts at seekOffset, so absolute source time =
+        // currentSeekOffset + video.currentTime.  For direct playback they're the same.
+        const actualTime = this.isHlsSession
+            ? this.currentSeekOffset + this.video.currentTime
+            : this.video.currentTime;
+
+        const percent = (actualTime / totalDuration) * 100;
+        if (this.progressSlider) this.progressSlider.value = percent;
+        if (this.timeCurrent) this.timeCurrent.textContent = this.formatTime(actualTime);
+        if (this.timeTotal) this.timeTotal.textContent = this.formatTime(totalDuration);
+
+        // Show "Up Next" panel early for series
         const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
         if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing && !this.nextEpisodeDismissed) {
-            const duration = this.video.duration;
-            const currentTime = this.video.currentTime;
-
-            // Only proceed if we have reliable duration data
-            if (isFinite(duration) && duration >= 180 && currentTime >= 120) {
-                const timeRemaining = duration - currentTime;
-                const creditsThreshold = 10; // seconds before end to show "Up Next"
-
-                if (timeRemaining <= creditsThreshold && timeRemaining > 0) {
+            if (isFinite(totalDuration) && totalDuration >= 180 && actualTime >= 120) {
+                const timeRemaining = totalDuration - actualTime;
+                if (timeRemaining <= 10 && timeRemaining > 0) {
                     const nextEp = this.getNextEpisode();
                     if (nextEp) {
                         this.nextEpisodeShowing = true;
@@ -807,15 +903,23 @@ class WatchPage {
             this.updateQualityBadge();
         }
 
-        // Handle resumption
-        if (this.resumeTime > 0 && this.video) {
+        // If video.duration is now finite, prefer it over the probe estimate
+        if (this.video && isFinite(this.video.duration) && this.video.duration > 0) {
+            this.knownDuration = this.video.duration;
+            if (this.timeTotal) this.timeTotal.textContent = this.formatTime(this.video.duration);
+        } else if (this.knownDuration > 0 && this.timeTotal) {
+            this.timeTotal.textContent = this.formatTime(this.knownDuration);
+        }
+
+        // Handle resumption — skip for HLS sessions because the backend seekOffset
+        // already positioned the stream; seeking video.currentTime here would be wrong.
+        if (!this.isHlsSession && this.resumeTime > 0 && this.video) {
             const duration = this.video.duration;
-            // Only resume if not near the end (95%)
             if (!duration || this.resumeTime < duration * 0.95) {
                 console.log(`[WatchPage] Resuming at ${this.resumeTime}s`);
                 this.video.currentTime = this.resumeTime;
             }
-            this.resumeTime = 0; // Reset after use
+            this.resumeTime = 0;
         }
     }
 
@@ -824,6 +928,15 @@ class WatchPage {
         this.playPauseBtn?.querySelector('.icon-play')?.classList.add('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');
         this.centerPlayBtn?.classList.remove('show');
+
+        // Transition transcode badge from red/orange → green once video is actually playing
+        if (this.transcodeStatusEx &&
+            (this.transcodeStatusEx.classList.contains('transcoding') ||
+             this.transcodeStatusEx.classList.contains('remuxing') ||
+             this.transcodeStatusEx.classList.contains('upscaling'))) {
+            this.transcodeStatusEx.classList.remove('transcoding', 'remuxing', 'upscaling');
+            this.transcodeStatusEx.classList.add('ready');
+        }
 
         // Start overlay auto-hide
         this.startOverlayTimer();

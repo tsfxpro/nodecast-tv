@@ -512,7 +512,7 @@ class ChannelList {
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
-              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
+              <div class="channel-name" data-title="${this.escapeHtml(channel.name)}">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
             </div>
             <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
@@ -625,7 +625,7 @@ class ChannelList {
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
-              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
+              <div class="channel-name" data-title="${this.escapeHtml(channel.name)}">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
             </div>
             <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
@@ -1043,7 +1043,7 @@ class ChannelList {
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
-              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
+              <div class="channel-name" data-title="${this.escapeHtml(channel.name)}">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.getProgramInfo(channel) || ''}</div>
             </div>
             <button class="favorite-btn active" title="Remove from Favorites">

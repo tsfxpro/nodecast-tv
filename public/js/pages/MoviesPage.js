@@ -110,7 +110,7 @@ class MoviesPage {
     async loadCategories() {
         try {
             this.categories = [];
-            this.hiddenCategoryIds = new Set(); // Track hidden categories
+            this.hiddenCategoryIds = new Set();
             this.categorySelect.innerHTML = '<option value="">All Categories</option>';
 
             const sourceId = this.sourceSelect.value;
@@ -118,33 +118,30 @@ class MoviesPage {
                 ? this.sources.filter(s => s.id === parseInt(sourceId))
                 : this.sources;
 
-            // Fetch hidden items for each source
-            for (const source of sourcesToLoad) {
-                try {
-                    const hiddenItems = await API.channels.getHidden(source.id);
-                    hiddenItems.forEach(h => {
-                        if (h.item_type === 'vod_category') {
-                            this.hiddenCategoryIds.add(`${source.id}:${h.item_id}`);
-                        }
-                    });
-                } catch (err) {
-                    console.warn(`Failed to load hidden items from source ${source.id}`);
-                }
+            // Fetch hidden items and categories in parallel across all sources
+            const results = await Promise.all(sourcesToLoad.map(async (source) => {
+                const [hiddenItems, cats] = await Promise.all([
+                    API.channels.getHidden(source.id).catch(() => []),
+                    API.proxy.xtream.vodCategories(source.id).catch(() => [])
+                ]);
+                return { source, hiddenItems, cats };
+            }));
+
+            for (const { source, hiddenItems } of results) {
+                hiddenItems.forEach(h => {
+                    if (h.item_type === 'vod_category') {
+                        this.hiddenCategoryIds.add(`${source.id}:${h.item_id}`);
+                    }
+                });
             }
 
-            for (const source of sourcesToLoad) {
-                try {
-                    const cats = await API.proxy.xtream.vodCategories(source.id);
-                    if (cats && Array.isArray(cats)) {
-                        cats.forEach(c => {
-                            // Skip hidden categories
-                            if (!this.hiddenCategoryIds.has(`${source.id}:${c.category_id}`)) {
-                                this.categories.push({ ...c, sourceId: source.id });
-                            }
-                        });
-                    }
-                } catch (err) {
-                    console.warn(`Failed to load categories from source ${source.id}:`, err.message);
+            for (const { source, cats } of results) {
+                if (cats && Array.isArray(cats)) {
+                    cats.forEach(c => {
+                        if (!this.hiddenCategoryIds.has(`${source.id}:${c.category_id}`)) {
+                            this.categories.push({ ...c, sourceId: source.id });
+                        }
+                    });
                 }
             }
 
@@ -174,37 +171,33 @@ class MoviesPage {
                 ? this.sources.filter(s => s.id === parseInt(sourceId))
                 : this.sources;
 
-            for (const source of sourcesToLoad) {
-                try {
-                    // Parse category if selected
-                    let catId = null;
-                    if (categoryValue) {
-                        const [catSourceId, categoryId] = categoryValue.split(':');
-                        if (parseInt(catSourceId) === source.id) {
-                            catId = categoryId;
-                        } else if (sourceId) {
-                            continue; // Skip this source if category is from different source
-                        }
+            const movieResults = await Promise.all(sourcesToLoad.map(async (source) => {
+                let catId = null;
+                if (categoryValue) {
+                    const [catSourceId, categoryId] = categoryValue.split(':');
+                    if (parseInt(catSourceId) === source.id) {
+                        catId = categoryId;
+                    } else if (sourceId) {
+                        return null; // Skip: category belongs to a different source
                     }
-
+                }
+                try {
                     const movies = await API.proxy.xtream.vodStreams(source.id, catId);
                     console.log(`[Movies] Source ${source.id}, Category ${catId || 'ALL'}: Got ${movies?.length || 0} movies`);
-                    if (movies && Array.isArray(movies)) {
-                        movies.forEach(m => {
-                            // Skip movies from hidden categories
-                            if (this.hiddenCategoryIds && this.hiddenCategoryIds.has(`${source.id}:${m.category_id}`)) {
-                                return;
-                            }
-                            this.movies.push({
-                                ...m,
-                                sourceId: source.id,
-                                id: `${source.id}:${m.stream_id}`
-                            });
-                        });
-                    }
+                    return { source, movies: movies || [] };
                 } catch (err) {
                     console.warn(`Failed to load movies from source ${source.id}:`, err.message);
+                    return { source, movies: [] };
                 }
+            }));
+
+            for (const result of movieResults) {
+                if (!result) continue;
+                const { source, movies } = result;
+                movies.forEach(m => {
+                    if (this.hiddenCategoryIds && this.hiddenCategoryIds.has(`${source.id}:${m.category_id}`)) return;
+                    this.movies.push({ ...m, sourceId: source.id, id: `${source.id}:${m.stream_id}` });
+                });
             }
 
             console.log(`[Movies] Total loaded: ${this.movies.length} movies`);

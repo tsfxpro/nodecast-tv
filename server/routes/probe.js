@@ -130,7 +130,8 @@ function analyzeProbeResult(probeResult, url) {
         audio: audioCodec,
         width: videoStream?.width || 0,
         height: videoStream?.height || 0,
-        audioChannels: audioStream?.channels || 0, // For Smart Audio Copy
+        duration: parseFloat(format.duration) || 0,
+        audioChannels: audioStream?.channels || 0,
         container: container,
         compatible: compatible,
         needsRemux: needsRemux,

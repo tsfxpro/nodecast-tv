@@ -16,6 +16,9 @@ const { Readable } = require('stream');
 // Default cache max age in hours
 const DEFAULT_MAX_AGE_HOURS = 24;
 
+// Short TTL for local DB queries (data changes only on 24h sync cycles)
+const DB_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Helper to get formatted category list from DB
 function getCategoriesFromDb(sourceId, type, includeHidden = false) {
     const db = getDb();
@@ -105,7 +108,11 @@ router.get('/xtream/:sourceId/live_categories', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const includeHidden = req.query.includeHidden === 'true';
+        const cacheKey = `db_live_cat_${includeHidden}`;
+        const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
+        if (cached) return res.json(cached);
         const cats = getCategoriesFromDb(sourceId, 'live', includeHidden);
+        cache.set('xtream', sourceId, cacheKey, cats);
         res.json(cats);
     } catch (err) {
         console.error(err);
@@ -119,7 +126,11 @@ router.get('/xtream/:sourceId/live_streams', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
+        const cacheKey = `db_live_streams_${categoryId || 'all'}_${includeHidden}`;
+        const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
+        if (cached) return res.json(cached);
         const streams = getStreamsFromDb(sourceId, 'live', categoryId, includeHidden);
+        cache.set('xtream', sourceId, cacheKey, streams);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -132,7 +143,11 @@ router.get('/xtream/:sourceId/vod_categories', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const includeHidden = req.query.includeHidden === 'true';
+        const cacheKey = `db_vod_cat_${includeHidden}`;
+        const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
+        if (cached) return res.json(cached);
         const cats = getCategoriesFromDb(sourceId, 'movie', includeHidden);
+        cache.set('xtream', sourceId, cacheKey, cats);
         res.json(cats);
     } catch (err) {
         console.error(err);
@@ -146,7 +161,11 @@ router.get('/xtream/:sourceId/vod_streams', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
+        const cacheKey = `db_vod_streams_${categoryId || 'all'}_${includeHidden}`;
+        const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
+        if (cached) return res.json(cached);
         const streams = getStreamsFromDb(sourceId, 'movie', categoryId, includeHidden);
+        cache.set('xtream', sourceId, cacheKey, streams);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -159,7 +178,11 @@ router.get('/xtream/:sourceId/series_categories', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const includeHidden = req.query.includeHidden === 'true';
+        const cacheKey = `db_series_cat_${includeHidden}`;
+        const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
+        if (cached) return res.json(cached);
         const cats = getCategoriesFromDb(sourceId, 'series', includeHidden);
+        cache.set('xtream', sourceId, cacheKey, cats);
         res.json(cats);
     } catch (err) {
         console.error(err);
@@ -173,7 +196,11 @@ router.get('/xtream/:sourceId/series', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
+        const cacheKey = `db_series_streams_${categoryId || 'all'}_${includeHidden}`;
+        const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
+        if (cached) return res.json(cached);
         const streams = getStreamsFromDb(sourceId, 'series', categoryId, includeHidden);
+        cache.set('xtream', sourceId, cacheKey, streams);
         res.json(streams);
     } catch (err) {
         console.error(err);
