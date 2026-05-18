@@ -2,6 +2,54 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/sqlite');
 
+// 25h matches the proxy DB_CACHE_TTL — data only changes on sync cycles
+const RECENT_CACHE_TTL = 25 * 60 * 60 * 1000;
+const recentCache = new Map();
+
+function getRecentCached(type, limit) {
+    const entry = recentCache.get(`${type}_${limit}`);
+    if (entry && (Date.now() - entry.timestamp) < RECENT_CACHE_TTL) return entry.data;
+    return null;
+}
+
+function setRecentCached(type, limit, data) {
+    recentCache.set(`${type}_${limit}`, { data, timestamp: Date.now() });
+}
+
+function clearRecentCache() {
+    recentCache.clear();
+}
+
+function queryRecent(type, limit) {
+    const db = getDb();
+    const rows = db.prepare(`
+        SELECT * FROM playlist_items p
+        WHERE p.type = ?
+          AND p.is_hidden = 0
+          AND NOT EXISTS (
+              SELECT 1 FROM categories c
+              WHERE c.source_id = p.source_id
+                AND c.category_id = p.category_id
+                AND c.type = p.type
+                AND c.is_hidden = 1
+          )
+        ORDER BY p.added_at DESC
+        LIMIT ?
+    `).all(type, limit);
+    return rows.map(item => ({ ...item, data: JSON.parse(item.data) }));
+}
+
+function warmRecentCache() {
+    try {
+        for (const type of ['movie', 'series']) {
+            setRecentCached(type, 12, queryRecent(type, 12));
+        }
+        console.log('[Cache] Recent items cache warmed');
+    } catch (err) {
+        console.error('[Cache] Recent items cache warm failed:', err.message);
+    }
+}
+
 // Helper to map API item types to DB types and tables
 function mapItemType(apiType) {
     switch (apiType) {
@@ -86,7 +134,7 @@ router.post('/hide', async (req, res) => {
         `);
 
         stmt.run(sourceId, mapping.type, itemId);
-
+        clearRecentCache();
         res.json({ success: true });
     } catch (err) {
         console.error('Error hiding item:', err);
@@ -112,7 +160,7 @@ router.post('/show', async (req, res) => {
         `);
 
         stmt.run(sourceId, mapping.type, itemId);
-
+        clearRecentCache();
         res.json({ success: true });
     } catch (err) {
         console.error('Error showing item:', err);
@@ -175,6 +223,7 @@ router.post('/hide/bulk', async (req, res) => {
         });
 
         runBulk(items);
+        clearRecentCache();
         res.json({ success: true, count: items.length });
     } catch (err) {
         if (err.code === 'SQLITE_BUSY') {
@@ -218,6 +267,7 @@ router.post('/show/bulk', async (req, res) => {
         });
 
         runBulk(items);
+        clearRecentCache();
         res.json({ success: true, count: items.length });
     } catch (err) {
         if (err.code === 'SQLITE_BUSY') {
@@ -251,6 +301,7 @@ router.post('/show/all', async (req, res) => {
         }
 
         console.log(`[Channels] Show all for source ${sourceId} (${contentType}): ${catCount} categories, ${itemCount} items`);
+        clearRecentCache();
         res.json({ success: true, categoriesUpdated: catCount, itemsUpdated: itemCount });
     } catch (err) {
         console.error('Error show all:', err);
@@ -281,6 +332,7 @@ router.post('/hide/all', async (req, res) => {
         }
 
         console.log(`[Channels] Hide all for source ${sourceId} (${contentType}): ${catCount} categories, ${itemCount} items`);
+        clearRecentCache();
         res.json({ success: true, categoriesUpdated: catCount, itemsUpdated: itemCount });
     } catch (err) {
         console.error('Error hide all:', err);
@@ -296,28 +348,12 @@ router.get('/recent', async (req, res) => {
             return res.status(400).json({ error: 'Valid type (movie or series) is required' });
         }
 
-        const db = getDb();
-        const recentItems = db.prepare(`
-            SELECT * FROM playlist_items p
-            WHERE p.type = ? 
-              AND p.is_hidden = 0
-              AND NOT EXISTS (
-                  SELECT 1 FROM categories c 
-                  WHERE c.source_id = p.source_id 
-                    AND c.category_id = p.category_id 
-                    AND c.type = p.type 
-                    AND c.is_hidden = 1
-              )
-            ORDER BY p.added_at DESC
-            LIMIT ?
-        `).all(type, parseInt(limit));
+        const parsedLimit = parseInt(limit);
+        const cached = getRecentCached(type, parsedLimit);
+        if (cached) return res.json(cached);
 
-        // Parse JSON data for each item
-        const formatted = recentItems.map(item => ({
-            ...item,
-            data: JSON.parse(item.data)
-        }));
-
+        const formatted = queryRecent(type, parsedLimit);
+        setRecentCached(type, parsedLimit, formatted);
         res.json(formatted);
     } catch (err) {
         console.error(`Error getting recent ${req.query.type}:`, err);
@@ -326,4 +362,6 @@ router.get('/recent', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.clearRecentCache = clearRecentCache;
+module.exports.warmRecentCache = warmRecentCache;
 

@@ -19,10 +19,12 @@ app.use(express.json({ limit: '50mb' }));
 
 // Initialize Passport
 const session = require('express-session');
+const SqliteSessionStore = require('./services/sessionStore');
 app.use(session({
+    store: new SqliteSessionStore(),
     secret: process.env.JWT_SECRET || 'keyboard cat',
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -173,7 +175,8 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sources', require('./routes/sources'));
 const proxyRouter = require('./routes/proxy');
 app.use('/api/proxy', proxyRouter);
-app.use('/api/channels', require('./routes/channels'));
+const channelsRouter = require('./routes/channels');
+app.use('/api/channels', channelsRouter);
 app.use('/api/favorites', require('./routes/favorites'));
 app.use('/api/transcode', require('./routes/transcode'));
 app.use('/api/remux', require('./routes/remux'));
@@ -209,9 +212,13 @@ app.listen(PORT, async () => {
 
     // Warm DB cache from existing data immediately (before sync)
     proxyRouter.warmDbCache().catch(err => console.warn('[Cache] Startup warm failed:', err.message));
+    channelsRouter.warmRecentCache();
 
     // Re-warm DB cache after every sync cycle (timer-driven or manual)
-    syncService.onSyncComplete(() => proxyRouter.warmDbCache());
+    syncService.onSyncComplete(() => {
+        proxyRouter.warmDbCache();
+        channelsRouter.warmRecentCache();
+    });
 
     // Start sync timer after server settles.
     // startSyncTimer() will sync immediately if overdue, or resume the countdown
