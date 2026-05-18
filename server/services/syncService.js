@@ -12,6 +12,15 @@ class SyncService {
         this.lastSyncTime = null; // Track when global sync last completed
         this._syncTimer = null;   // Server-side sync timer
         this._currentInterval = null;
+        this._postSyncCallbacks = []; // Registered callbacks run after each syncAll
+    }
+
+    /**
+     * Register a callback to run after every syncAll() completes.
+     * Used by proxy.js to refresh the DB cache after each sync cycle.
+     */
+    onSyncComplete(fn) {
+        this._postSyncCallbacks.push(fn);
     }
 
     /**
@@ -22,15 +31,53 @@ class SyncService {
     }
 
     /**
-     * Start the server-side sync timer based on settings
-     * Should be called once on server startup after initial sync
+     * Persist lastSyncTime to the sync_status table so it survives container restarts.
+     * Uses source_id=0 / type='global' as a sentinel row.
+     */
+    _persistLastSyncTime() {
+        try {
+            const db = getDb();
+            db.prepare(`
+                INSERT INTO sync_status (source_id, type, last_sync, status, error)
+                VALUES (0, 'global', ?, 'success', NULL)
+                ON CONFLICT(source_id, type) DO UPDATE SET
+                    last_sync = excluded.last_sync,
+                    status    = excluded.status,
+                    error     = excluded.error
+            `).run(Date.now());
+        } catch (err) {
+            console.warn('[Sync] Failed to persist last sync time:', err.message);
+        }
+    }
+
+    /**
+     * Load the persisted lastSyncTime from the DB.
+     * Returns a Date or null if no record exists.
+     */
+    _loadLastSyncTime() {
+        try {
+            const db = getDb();
+            const row = db.prepare(
+                `SELECT last_sync FROM sync_status WHERE source_id = 0 AND type = 'global'`
+            ).get();
+            if (row && row.last_sync) return new Date(row.last_sync);
+        } catch (err) {
+            console.warn('[Sync] Failed to load last sync time:', err.message);
+        }
+        return null;
+    }
+
+    /**
+     * Start the server-side sync timer based on settings.
+     * On startup this replaces the unconditional syncAll() call:
+     *   - If the last sync is recent enough, resumes the countdown from where it left off.
+     *   - If the last sync is overdue (or never happened), syncs immediately then starts
+     *     the regular interval.
      */
     async startSyncTimer() {
-        // Get interval from settings
         const currentSettings = await settings.get();
         const intervalHours = parseInt(currentSettings.epgRefreshInterval) || 24;
 
-        // If interval is 0, don't start timer (manual only mode)
         if (intervalHours <= 0) {
             console.log('[Sync] Auto-sync disabled (manual only mode)');
             this.stopSyncTimer();
@@ -40,28 +87,54 @@ class SyncService {
 
         const intervalMs = intervalHours * 60 * 60 * 1000;
 
-        // Don't restart if interval hasn't changed and timer exists
+        // Don't restart if interval hasn't changed and timer is already running
         if (this._currentInterval === intervalHours && this._syncTimer) {
             console.log(`[Sync] Timer already running for ${intervalHours} hours, not restarting`);
             return;
         }
 
-        // Clear existing timer
         this.stopSyncTimer();
 
-        const nextSyncTime = new Date(Date.now() + intervalMs);
-        console.log(`[Sync] Starting server-side sync timer: every ${intervalHours} hours`);
-        console.log(`[Sync] Next scheduled sync at: ${nextSyncTime.toLocaleString()}`);
+        // Recover last sync time from DB if we don't have it in memory
+        if (!this.lastSyncTime) {
+            this.lastSyncTime = this._loadLastSyncTime();
+        }
 
-        this._syncTimer = setInterval(async () => {
-            console.log('[Sync] Scheduled sync triggered');
+        const elapsed   = this.lastSyncTime ? (Date.now() - this.lastSyncTime.getTime()) : Infinity;
+        const remaining = intervalMs - elapsed;
+
+        // Kick off the repeating interval (called after the first fire)
+        const startInterval = () => {
+            this._syncTimer = setInterval(async () => {
+                console.log('[Sync] Scheduled sync triggered');
+                await this.syncAll();
+                console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
+            }, intervalMs);
+            this._currentInterval = intervalHours;
+        };
+
+        if (remaining <= 0) {
+            // Overdue or first-ever run — sync immediately
+            const reason = this.lastSyncTime ? 'overdue' : 'no prior sync found';
+            console.log(`[Sync] Running startup sync (${reason})...`);
             await this.syncAll();
-            // Log next sync time
-            const next = new Date(Date.now() + intervalMs);
-            console.log(`[Sync] Next scheduled sync at: ${next.toLocaleString()}`);
-        }, intervalMs);
-
-        this._currentInterval = intervalHours;
+            console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
+            startInterval();
+        } else {
+            // Resume the countdown from where it left off
+            const elapsedMin = Math.round(elapsed / 60000);
+            console.log(`[Sync] Skipping startup sync — last sync was ${elapsedMin}m ago`);
+            console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + remaining).toLocaleString()}`);
+            this._currentInterval = intervalHours;
+            // setTimeout and setInterval share the same clearInterval/clearTimeout in Node,
+            // so stopSyncTimer() will cancel this correctly if settings change.
+            this._syncTimer = setTimeout(async () => {
+                console.log('[Sync] Scheduled sync triggered');
+                await this.syncAll();
+                console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
+                startInterval();
+            }, remaining);
+        }
     }
 
     /**
@@ -96,7 +169,11 @@ class SyncService {
                 }
             }
             this.lastSyncTime = new Date();
+            this._persistLastSyncTime();
             console.log('[Sync] Global sync completed at', this.lastSyncTime.toISOString());
+            for (const fn of this._postSyncCallbacks) {
+                await fn().catch(err => console.warn('[Sync] Post-sync callback failed:', err.message));
+            }
         } catch (err) {
             console.error('[Sync] Global sync failed:', err);
         }

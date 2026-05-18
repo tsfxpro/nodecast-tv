@@ -171,7 +171,8 @@ process.on('SIGTERM', async () => {
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sources', require('./routes/sources'));
-app.use('/api/proxy', require('./routes/proxy'));
+const proxyRouter = require('./routes/proxy');
+app.use('/api/proxy', proxyRouter);
 app.use('/api/channels', require('./routes/channels'));
 app.use('/api/favorites', require('./routes/favorites'));
 app.use('/api/transcode', require('./routes/transcode'));
@@ -206,10 +207,16 @@ app.listen(PORT, async () => {
         console.error('Plugin initialization failed:', err);
     });
 
-    // Trigger background sync with delay to allow server to settle
+    // Warm DB cache from existing data immediately (before sync)
+    proxyRouter.warmDbCache().catch(err => console.warn('[Cache] Startup warm failed:', err.message));
+
+    // Re-warm DB cache after every sync cycle (timer-driven or manual)
+    syncService.onSyncComplete(() => proxyRouter.warmDbCache());
+
+    // Start sync timer after server settles.
+    // startSyncTimer() will sync immediately if overdue, or resume the countdown
+    // from the last completed sync — no unconditional full sync on every restart.
     setTimeout(async () => {
-        await syncService.syncAll().catch(console.error);
-        // Start the server-side sync timer after initial sync
         await syncService.startSyncTimer().catch(console.error);
 
         // Detect hardware acceleration capabilities
