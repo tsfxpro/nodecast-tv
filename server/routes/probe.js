@@ -30,17 +30,36 @@ const BROWSER_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'vorbis'];
  */
 function probeStream(url, ffprobePath, userAgent = null, timeout = 15000) {
     return new Promise((resolve, reject) => {
+        // For HLS streams, a small probesize is enough — codec info is in the first segment
+        // headers. A large probesize (5MB) keeps a live TCP connection to the provider open
+        // long enough for it to count as an active session, causing 458 when the player starts.
+        const isHls = url.includes('.m3u8') || url.includes('m3u8');
+        const probeSize = isHls ? '500000' : '5000000';
+        const analyzeDuration = isHls ? '500000' : '5000000';
+
+        // ffprobe/libavformat only reads http_proxy (lowercase) from the environment,
+        // but our compose sets HTTP_PROXY (uppercase). Pass it explicitly so ffprobe
+        // routes through gluetun VPN exactly like fetch() does.
+        const httpProxy =
+            process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+            process.env.http_proxy || process.env.https_proxy;
+
         const args = [
             '-v', 'error',
             '-user_agent', userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             '-print_format', 'json',
             '-show_streams',
             '-show_format',
-            '-probesize', '5000000',
-            '-analyzeduration', '5000000',
+            '-probesize', probeSize,
+            '-analyzeduration', analyzeDuration,
             url
         ];
 
+        if (httpProxy) {
+            args.unshift('-http_proxy', httpProxy);
+        }
+
+        console.log(`[Probe] ffprobe proxy=${httpProxy || 'DIRECT'} ${args.slice(-5).join(' ')}`);
         const proc = spawn(ffprobePath, args);
         let stdout = '';
         let stderr = '';
@@ -186,7 +205,17 @@ router.get('/', async (req, res) => {
     } catch (err) {
         console.error('[Probe] Failed:', err.message);
 
-        // On error, assume transcode needed to be safe
+        // 458 = provider concurrent-stream limit. Return a distinct error so the player
+        // can stop immediately instead of launching ffmpeg sessions that will also 458.
+        const isStreamLimit = err.message.includes('458') || err.message.includes('4XX Client Error');
+        if (isStreamLimit) {
+            return res.status(429).json({
+                error: 'stream_limit',
+                details: err.message
+            });
+        }
+
+        // For other probe failures assume transcode needed (safe default).
         res.json({
             video: 'unknown',
             audio: 'unknown',
@@ -194,6 +223,7 @@ router.get('/', async (req, res) => {
             compatible: false,
             needsRemux: false,
             needsTranscode: true,
+            probeError: true,
             error: err.message
         });
     }

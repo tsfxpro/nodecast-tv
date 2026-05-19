@@ -203,6 +203,13 @@ router.get('/', async (req, res) => {
         '-reconnect_delay_max', '3',
         // Prevent Range/HEAD requests that some providers reject with 405
         '-seekable', '0',
+        // Route through gluetun VPN — libavformat only reads http_proxy (lowercase)
+        // but compose sets HTTP_PROXY (uppercase), so pass explicitly.
+        ...(process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+            process.env.http_proxy || process.env.https_proxy
+            ? ['-http_proxy', process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+               process.env.http_proxy || process.env.https_proxy]
+            : []),
         '-i', url,
         // Map only first video and audio stream (avoid subtitle streams causing issues)
         '-map', '0:v:0',

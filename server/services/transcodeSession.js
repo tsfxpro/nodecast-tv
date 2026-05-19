@@ -202,6 +202,13 @@ class TranscodeSession extends EventEmitter {
         }
 
         // Input options (common)
+        const httpProxy =
+            process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+            process.env.http_proxy || process.env.https_proxy;
+        if (httpProxy) {
+            args.push('-http_proxy', httpProxy);
+        }
+
         args.push(
             '-probesize', '5000000',
             '-analyzeduration', '5000000',

@@ -857,9 +857,18 @@ class VideoPlayer {
             // Stop any WatchPage playback (movies/series) before starting Live TV
             window.app?.pages?.watch?.stop?.();
 
+            const hadActiveStream = this.lastStreamMode !== null;
+
             // Stop current playback
             this.stop();
             this.updateTranscodeStatus('hidden');
+
+            // Give the provider time to expire the previous session before we probe or
+            // connect again. Without this, the probe (ffprobe) or player hits the provider
+            // while the old session is still counted → 458 concurrent-stream rejection.
+            if (hadActiveStream) {
+                await new Promise(r => setTimeout(r, 2000));
+            }
 
             // Hide "select a channel" overlay
             this.overlay.classList.add('hidden');
@@ -877,6 +886,12 @@ class VideoPlayer {
                 try {
                     const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}`);
                     const info = await probeRes.json();
+
+                    if (probeRes.status === 429 || info.error === 'stream_limit') {
+                        this.showError('Stream limit reached — the provider rejected the connection. Try again in a few seconds.');
+                        return;
+                    }
+
                     console.log(`[Player] Probe result: video=${info.video}, audio=${info.audio}, ${info.width}x${info.height}, compatible=${info.compatible}`);
 
                     // Store probe result for quality badge display
@@ -924,6 +939,7 @@ class VideoPlayer {
                         });
                         this.currentUrl = playlistUrl; // Update currentUrl for HLS reload
 
+                        this.lastStreamMode = 'server';
                         this.playHls(playlistUrl);
 
                         this.updateNowPlaying(channel);
@@ -937,6 +953,7 @@ class VideoPlayer {
                         this.updateTranscodeStatus('remuxing', 'Remux (Auto)');
                         const remuxUrl = `/api/remux?url=${encodeURIComponent(streamUrl)}`;
                         this.currentUrl = remuxUrl;
+                        this.lastStreamMode = 'server';
                         this.video.src = remuxUrl;
                         this.video.play().catch(e => {
                             if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
@@ -1055,6 +1072,7 @@ class VideoPlayer {
                 console.log('[Player] Stream type:', isRawTs ? 'Raw TS' : 'Extension-less (assumed TS)');
                 this.updateTranscodeStatus('remuxing', 'Remux (Force)');
                 const remuxUrl = this.getRemuxUrl(streamUrl);
+                this.lastStreamMode = 'server';
                 this.video.src = remuxUrl;
                 this.video.play().catch(e => {
                     if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
@@ -1083,6 +1101,7 @@ class VideoPlayer {
             // Priority 1: Use HLS.js for HLS streams on browsers that support it
             if (looksLikeHls && Hls.isSupported()) {
                 this.updateTranscodeStatus('direct', 'Direct HLS');
+                this.lastStreamMode = 'direct';
 
                 // Use playHls helper logic here (or extract it)
                 // For now, let's just use existing logic but wrapped/modularized if possible?
@@ -1147,6 +1166,7 @@ class VideoPlayer {
                 this.video.canPlayType('application/vnd.apple.mpegurl') === 'maybe') {
                 // Priority 2: Native HLS support (Safari on iOS/macOS where HLS.js may not work)
                 this.updateTranscodeStatus('direct', 'Direct Native');
+                this.lastStreamMode = 'direct';
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name === 'AbortError') return; // Ignore interruption by new load
@@ -1162,6 +1182,7 @@ class VideoPlayer {
             } else {
                 // Priority 3: Try direct playback for non-HLS streams
                 this.updateTranscodeStatus('direct', 'Direct Play');
+                this.lastStreamMode = 'direct';
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
@@ -1398,6 +1419,7 @@ class VideoPlayer {
         this.video.pause();
         this.video.src = '';
         this.video.load();
+        this.lastStreamMode = null;
 
         // Reset UI to idle state
         this.overlay.classList.remove('hidden'); // Show "Select a channel"

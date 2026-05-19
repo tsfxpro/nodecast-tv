@@ -24,6 +24,11 @@ router.get('/', (req, res) => {
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         '-probesize', '5000000',
         '-analyzeduration', '5000000',
+        ...(process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+            process.env.http_proxy || process.env.https_proxy
+            ? ['-http_proxy', process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+               process.env.http_proxy || process.env.https_proxy]
+            : []),
         '-i', url,
         '-map', `0:${index}`,
         '-c:s', 'webvtt',

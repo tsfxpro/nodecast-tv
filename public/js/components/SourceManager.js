@@ -249,7 +249,7 @@ class SourceManager {
         </div>
         <div class="form-group">
           <label for="source-password">Password</label>
-          <input type="password" id="source-password" class="form-input" 
+          <input type="password" id="source-password" class="form-input"
                  value="${source.password && !source.password.includes('•') ? source.password : ''}">
         </div>
       `;

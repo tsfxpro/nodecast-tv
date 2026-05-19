@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const db = require('../db');
+const liveStreamManager = require('../services/liveStreamManager');
 
 /**
  * Remux stream (container conversion only)
@@ -18,6 +19,12 @@ router.get('/', async (req, res) => {
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
     }
+
+    // Kill any previous live stream for this client and wait for the VPN connection
+    // to fully close before opening a new one (prevents provider 458 on channel switch).
+    const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
+    const sessionId = `${Date.now()}-${Math.random()}`;
+    await liveStreamManager.killAndWait(clientIp);
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
 
@@ -50,6 +57,11 @@ router.get('/', async (req, res) => {
         '-reconnect_delay_max', '5',
         // Prevent Range/HEAD requests that some providers reject with 405
         '-seekable', '0',
+        ...(process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+            process.env.http_proxy || process.env.https_proxy
+            ? ['-http_proxy', process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+               process.env.http_proxy || process.env.https_proxy]
+            : []),
         '-i', url,
         // STRICT MAPPING: Only map video and audio, ignore subtitles/data/attachments
         // This prevents remux failure when source container has incompatible subtitle tracks (e.g. MKV -> MP4)
@@ -83,6 +95,9 @@ router.get('/', async (req, res) => {
         return res.status(500).json({ error: 'FFmpeg spawn failed', details: spawnErr.message });
     }
 
+    // Register so the next channel-switch request can kill this process cleanly.
+    liveStreamManager.register(clientIp, ffmpeg, sessionId);
+
     // Set headers for fragmented MP4
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -99,14 +114,18 @@ router.get('/', async (req, res) => {
         }
     });
 
-    // Cleanup on client disconnect
+    // Cleanup on client disconnect (normal path: user closed the tab / changed channel).
+    // Guard with sessionId so a stale close from an old request doesn't unregister a
+    // newer session that has already taken over for this clientIp.
     req.on('close', () => {
         console.log('[Remux] Client disconnected, killing FFmpeg process');
         ffmpeg.kill('SIGKILL');
+        liveStreamManager.unregisterIfCurrent(clientIp, sessionId);
     });
 
     // Handle process exit
     ffmpeg.on('exit', (code) => {
+        liveStreamManager.unregisterIfCurrent(clientIp, sessionId);
         if (code !== null && code !== 0 && code !== 255) {
             console.error(`[Remux] FFmpeg exited with code ${code}`);
         }

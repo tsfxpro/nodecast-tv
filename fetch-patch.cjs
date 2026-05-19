@@ -1,6 +1,6 @@
 'use strict';
 
-// Loaded via NODE_OPTIONS=--require before any app code.
+// Required as the first import in server/index.js, before all other modules.
 // Ensures every outbound fetch() call:
 //   1. Routes through gluetun VPN (undici ProxyAgent from HTTP_PROXY)
 //   2. Carries a consistent browser User-Agent
@@ -21,6 +21,7 @@ const SCRUB_HEADERS = [
 
 // Wire native fetch() through gluetun so IPTV provider sees the VPN IP.
 // Native Node.js fetch (undici) does not read HTTP_PROXY automatically.
+let _configuredProxyUrl = null;
 try {
   const { ProxyAgent, setGlobalDispatcher } = require('undici');
   const proxyUrl =
@@ -30,9 +31,13 @@ try {
     process.env.http_proxy;
   if (proxyUrl) {
     setGlobalDispatcher(new ProxyAgent(proxyUrl));
+    _configuredProxyUrl = proxyUrl;
+    console.log('[fetch-patch] fetch() routed through proxy:', proxyUrl);
+  } else {
+    console.warn('[fetch-patch] WARNING: no HTTP_PROXY set — fetch() will use DIRECT connections');
   }
-} catch (_) {
-  // undici not directly require()-able in this build; proxy routing unchanged.
+} catch (e) {
+  console.warn('[fetch-patch] WARNING: undici ProxyAgent setup failed — fetch() may use DIRECT connections:', e.message);
 }
 
 // Patch globalThis.fetch to enforce clean outbound headers on every call.
@@ -51,6 +56,19 @@ if (typeof _origFetch === 'function') {
     }
 
     opts.headers = headers;
+
+    // Log outbound host so we can verify VPN routing in logs.
+    // Only log external hosts (skip localhost/internal API calls).
+    try {
+      const url = typeof input === 'string' ? input : (input?.url || String(input));
+      const host = new URL(url).host;
+      if (!host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('streaming-internal')) {
+        console.log(`[fetch-patch] fetch ${host} via ${_configuredProxyUrl ? 'proxy' : 'DIRECT'}`);
+      }
+    } catch (_) {}
+
     return _origFetch.call(this, input, opts);
   };
+} else {
+  console.warn('[fetch-patch] WARNING: globalThis.fetch not available — header scrubbing disabled');
 }

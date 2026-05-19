@@ -1,3 +1,4 @@
+require('../fetch-patch.cjs'); // Route all fetch() through VPN proxy + scrub proxy-revealing headers
 const express = require('express');
 require('dotenv').config();
 const path = require('path');
