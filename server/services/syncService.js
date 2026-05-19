@@ -172,7 +172,7 @@ class SyncService {
             this._persistLastSyncTime();
             console.log('[Sync] Global sync completed at', this.lastSyncTime.toISOString());
             for (const fn of this._postSyncCallbacks) {
-                await fn().catch(err => console.warn('[Sync] Post-sync callback failed:', err.message));
+                await Promise.resolve(fn()).catch(err => console.warn('[Sync] Post-sync callback failed:', err.message));
             }
         } catch (err) {
             console.error('[Sync] Global sync failed:', err);
