@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { sources } = require('../db');
@@ -17,7 +18,7 @@ router.get('/', async (req, res) => {
         }));
         res.json(sanitized);
     } catch (err) {
-        console.error('Error getting sources:', err);
+        log.error('Error getting sources:', err);
         res.status(500).json({ error: 'Failed to get sources' });
     }
 });
@@ -30,7 +31,7 @@ router.get('/status', async (req, res) => {
         const statuses = db.prepare('SELECT * FROM sync_status').all();
         res.json(statuses);
     } catch (err) {
-        console.error('Error getting sync status:', err);
+        log.error('Error getting sync status:', err);
         res.status(500).json({ error: 'Failed to get sync status' });
     }
 });
@@ -41,7 +42,7 @@ router.get('/type/:type', async (req, res) => {
         const typeSources = await sources.getByType(req.params.type);
         res.json(typeSources);
     } catch (err) {
-        console.error('Error getting sources by type:', err);
+        log.error('Error getting sources by type:', err);
         res.status(500).json({ error: 'Failed to get sources' });
     }
 });
@@ -55,7 +56,7 @@ router.get('/:id', async (req, res) => {
         }
         res.json(source);
     } catch (err) {
-        console.error('Error getting source:', err);
+        log.error('Error getting source:', err);
         res.status(500).json({ error: 'Failed to get source' });
     }
 });
@@ -75,10 +76,10 @@ router.post('/', async (req, res) => {
 
         const source = await sources.create({ type, name, url, username, password });
         // Trigger Sync
-        syncService.syncSource(source.id).catch(console.error);
+        syncService.syncSource(source.id).catch(log.error);
         res.status(201).json(source);
     } catch (err) {
-        console.error('Error creating source:', err);
+        log.error('Error creating source:', err);
         res.status(500).json({ error: 'Failed to create source' });
     }
 });
@@ -99,10 +100,10 @@ router.put('/:id', async (req, res) => {
             password: password !== undefined ? password : existing.password
         });
         // Trigger Sync (if critical fields changed? safely just trigger it)
-        syncService.syncSource(parseInt(req.params.id)).catch(console.error);
+        syncService.syncSource(parseInt(req.params.id)).catch(log.error);
         res.json(updated);
     } catch (err) {
-        console.error('Error updating source:', err);
+        log.error('Error updating source:', err);
         res.status(500).json({ error: 'Failed to update source' });
     }
 });
@@ -128,14 +129,14 @@ router.delete('/:id', async (req, res) => {
         const epgResult = deleteEpg.run(sourceId);
         deleteSyncStatus.run(sourceId);
 
-        console.log(`[Source] Cascade delete for source ${sourceId}: ${catResult.changes} categories, ${itemResult.changes} items, ${epgResult.changes} EPG programs`);
+        log.info(`[Source] Cascade delete for source ${sourceId}: ${catResult.changes} categories, ${itemResult.changes} items, ${epgResult.changes} EPG programs`);
 
         // Delete source config and related hidden items (favorites handled by db.js)
         await sources.delete(sourceId);
 
         res.json({ success: true });
     } catch (err) {
-        console.error('Error deleting source:', err);
+        log.error('Error deleting source:', err);
         res.status(500).json({ error: 'Failed to delete source' });
     }
 });
@@ -150,12 +151,12 @@ router.post('/:id/toggle', async (req, res) => {
 
         // If enabled, trigger sync
         if (updated.enabled) {
-            syncService.syncSource(parseInt(req.params.id)).catch(console.error);
+            syncService.syncSource(parseInt(req.params.id)).catch(log.error);
         }
 
         res.json(updated);
     } catch (err) {
-        console.error('Error toggling source:', err);
+        log.error('Error toggling source:', err);
         res.status(500).json({ error: 'Failed to toggle source' });
     }
 });
@@ -168,11 +169,11 @@ router.post('/:id/sync', async (req, res) => {
         if (!source) return res.status(404).json({ error: 'Source not found' });
 
         // Trigger sync (async)
-        syncService.syncSource(id).catch(console.error);
+        syncService.syncSource(id).catch(log.error);
 
         res.json({ success: true, message: 'Sync started' });
     } catch (err) {
-        console.error('Error starting sync:', err);
+        log.error('Error starting sync:', err);
         res.status(500).json({ error: 'Failed to start sync' });
     }
 });
@@ -200,7 +201,7 @@ router.post('/:id/test', async (req, res) => {
             res.json({ success: isValid, message: isValid ? 'Valid EPG XML' : 'Invalid EPG format' });
         }
     } catch (err) {
-        console.error('Error testing source:', err);
+        log.error('Error testing source:', err);
         res.json({ success: false, error: err.message });
     }
 });
@@ -222,9 +223,9 @@ router.post('/estimate', async (req, res) => {
             return res.json({ count: 0, needsWarning: false, threshold: M3U_LARGE_THRESHOLD });
         }
 
-        console.log(`[Sources] Estimating M3U size for URL...`);
+        log.debug(`[Sources] Estimating M3U size for URL...`);
         const count = await m3uParser.countEntries(url);
-        console.log(`[Sources] M3U estimate: ${count} entries`);
+        log.debug(`[Sources] M3U estimate: ${count} entries`);
 
         res.json({
             count,
@@ -232,7 +233,7 @@ router.post('/estimate', async (req, res) => {
             threshold: M3U_LARGE_THRESHOLD
         });
     } catch (err) {
-        console.error('Error estimating M3U size:', err);
+        log.error('Error estimating M3U size:', err);
         res.status(500).json({ error: 'Failed to estimate playlist size', message: err.message });
     }
 });
@@ -250,9 +251,9 @@ router.get('/:id/estimate', async (req, res) => {
             return res.json({ count: 0, needsWarning: false, threshold: M3U_LARGE_THRESHOLD });
         }
 
-        console.log(`[Sources] Estimating M3U size for ${source.name}...`);
+        log.debug(`[Sources] Estimating M3U size for ${source.name}...`);
         const count = await m3uParser.countEntries(source.url);
-        console.log(`[Sources] M3U estimate: ${count} entries`);
+        log.debug(`[Sources] M3U estimate: ${count} entries`);
 
         res.json({
             count,
@@ -260,7 +261,7 @@ router.get('/:id/estimate', async (req, res) => {
             threshold: M3U_LARGE_THRESHOLD
         });
     } catch (err) {
-        console.error('Error estimating M3U size:', err);
+        log.error('Error estimating M3U size:', err);
         res.status(500).json({ error: 'Failed to estimate playlist size', message: err.message });
     }
 });
@@ -269,10 +270,10 @@ router.get('/:id/estimate', async (req, res) => {
 router.post('/sync-all', async (req, res) => {
     try {
         // Trigger global sync (async - don't wait for completion)
-        syncService.syncAll().catch(console.error);
+        syncService.syncAll().catch(log.error);
         res.json({ success: true, message: 'Global sync started' });
     } catch (err) {
-        console.error('Error starting global sync:', err);
+        log.error('Error starting global sync:', err);
         res.status(500).json({ error: 'Failed to start global sync' });
     }
 });

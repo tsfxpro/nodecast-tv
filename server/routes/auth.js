@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const auth = require('../auth');
+const log = require('../utils/logger');
 
 // Configure Passport strategies
 auth.configureLocalStrategy(
@@ -55,7 +56,7 @@ router.get('/setup-required', async (req, res) => {
         const userCount = await db.users.count();
         res.json({ setupRequired: userCount === 0 });
     } catch (err) {
-        console.error('Error in /setup-required:', err);
+        log.error('Error in /setup-required:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -100,7 +101,7 @@ router.post('/setup', async (req, res) => {
             user: adminUser
         });
     } catch (err) {
-        console.error('Error in /setup:', err);
+        log.error('Error in /setup:', err);
         res.status(500).json({ error: err.message || 'Server error' });
     }
 });
@@ -112,7 +113,7 @@ router.post('/setup', async (req, res) => {
 router.post('/login', (req, res, next) => {
     auth.passport.authenticate('local', { session: false }, (err, user, info) => {
         if (err) {
-            console.error('Login error:', err);
+            log.error('Login error:', err);
             return res.status(500).json({ error: 'Server error' });
         }
 
@@ -162,7 +163,7 @@ router.get('/me', auth.requireAuth, async (req, res) => {
             role: user.role
         });
     } catch (err) {
-        console.error('Error in /me:', err);
+        log.error('Error in /me:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -183,7 +184,7 @@ router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
 
         res.json(users);
     } catch (err) {
-        console.error('Error fetching users:', err);
+        log.error('Error fetching users:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -217,7 +218,7 @@ router.post('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
 
         res.status(201).json(newUser);
     } catch (err) {
-        console.error('Error creating user:', err);
+        log.error('Error creating user:', err);
         res.status(500).json({ error: err.message || 'Server error' });
     }
 });
@@ -265,7 +266,7 @@ router.put('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) =
         const updatedUser = await db.users.update(id, updates);
         res.json(updatedUser);
     } catch (err) {
-        console.error('Error updating user:', err);
+        log.error('Error updating user:', err);
         res.status(500).json({ error: err.message || 'Server error' });
     }
 });
@@ -286,7 +287,7 @@ router.delete('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res
         await db.users.delete(id);
         res.json({ success: true, message: 'User deleted successfully' });
     } catch (err) {
-        console.error('Error deleting user:', err);
+        log.error('Error deleting user:', err);
         res.status(500).json({ error: err.message || 'Server error' });
     }
 });

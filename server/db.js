@@ -1,6 +1,7 @@
 const fs = require('fs/promises');
 const path = require('path');
 const { existsSync, mkdirSync } = require('fs');
+const log = require('./utils/logger');
 
 // Ensure data directory exists (sync is fine for startup)
 const dataDir = path.join(__dirname, '..', 'data');
@@ -40,7 +41,7 @@ async function loadDb() {
       throw error;
     }
   } catch (err) {
-    console.error('Error loading database:', err);
+    log.error('Error loading database:', err);
     // Return safe default on error to prevent crashing, but log it
     return {
       sources: [],
@@ -115,13 +116,13 @@ async function saveDb(data) {
       await fs.writeFile(tmpPath, jsonString);
       await fs.rename(tmpPath, dbPath);
     } catch (err) {
-      console.error('Error writing database:', err);
+      log.error('Error writing database:', err);
       // Clean up temp file if it exists
       try { await fs.unlink(tmpPath); } catch { /* ignore */ }
       throw err;
     }
   }).catch(err => {
-    console.error('Database write failed:', err);
+    log.error('Database write failed:', err);
   });
 
   return writeQueue;

@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { sources } = require('../db');
@@ -93,7 +94,7 @@ router.get('/xtream/:sourceId', async (req, res) => {
         // Proxy auth check to upstream to ensure credentials are still valid
 
         const cached = cache.get('xtream', source.id, 'auth', 300000);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
 
         const api = xtreamApi.createFromSource(source);
         const data = await api.authenticate();
@@ -111,12 +112,12 @@ router.get('/xtream/:sourceId/live_categories', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
         const cacheKey = `db_live_cat_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
         const cats = getCategoriesFromDb(sourceId, 'live', includeHidden);
         cache.set('xtream', sourceId, cacheKey, cats);
         res.json(cats);
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -129,12 +130,12 @@ router.get('/xtream/:sourceId/live_streams', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
         const cacheKey = `db_live_streams_${categoryId || 'all'}_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
         const streams = getStreamsFromDb(sourceId, 'live', categoryId, includeHidden);
         cache.set('xtream', sourceId, cacheKey, streams);
         res.json(streams);
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -146,12 +147,12 @@ router.get('/xtream/:sourceId/vod_categories', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
         const cacheKey = `db_vod_cat_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
         const cats = getCategoriesFromDb(sourceId, 'movie', includeHidden);
         cache.set('xtream', sourceId, cacheKey, cats);
         res.json(cats);
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -164,12 +165,12 @@ router.get('/xtream/:sourceId/vod_streams', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
         const cacheKey = `db_vod_streams_${categoryId || 'all'}_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
         const streams = getStreamsFromDb(sourceId, 'movie', categoryId, includeHidden);
         cache.set('xtream', sourceId, cacheKey, streams);
         res.json(streams);
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -181,12 +182,12 @@ router.get('/xtream/:sourceId/series_categories', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
         const cacheKey = `db_series_cat_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
         const cats = getCategoriesFromDb(sourceId, 'series', includeHidden);
         cache.set('xtream', sourceId, cacheKey, cats);
         res.json(cats);
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -199,12 +200,12 @@ router.get('/xtream/:sourceId/series', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
         const cacheKey = `db_series_streams_${categoryId || 'all'}_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
         const streams = getStreamsFromDb(sourceId, 'series', categoryId, includeHidden);
         cache.set('xtream', sourceId, cacheKey, streams);
         res.json(streams);
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -221,7 +222,7 @@ router.get('/xtream/:sourceId/series_info', async (req, res) => {
 
         const cacheKey = `series_info_${seriesId}`;
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
 
         const api = xtreamApi.createFromSource(source);
         const data = await api.getSeriesInfo(seriesId);
@@ -243,7 +244,7 @@ router.get('/xtream/:sourceId/vod_info', async (req, res) => {
 
         const cacheKey = `vod_info_${vodId}`;
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
-        if (cached) return res.json(cached);
+        if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
 
         const api = xtreamApi.createFromSource(source);
         const data = await api.getVodInfo(vodId);
@@ -287,7 +288,7 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
 
         res.json({ url: streamUrl });
     } catch (err) {
-        console.error('Error getting stream URL:', err);
+        log.error('Error getting stream URL:', err);
         res.status(500).json({ error: 'Failed to get stream URL' });
     }
 });
@@ -337,7 +338,7 @@ router.get('/m3u/:sourceId', async (req, res) => {
         res.json({ channels: reformattedChannels, groups: reformattedGroups });
 
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -400,7 +401,7 @@ router.get('/epg/:sourceId', async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        log.error(err);
         res.status(500).json({ error: 'Database error' });
     }
 });
@@ -495,7 +496,7 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
 
         res.json(data);
     } catch (err) {
-        console.error('Xtream proxy error:', err);
+        log.error('Xtream proxy error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -518,7 +519,7 @@ router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
         const url = api.buildStreamUrl(streamId, type, container);
         res.json({ url });
     } catch (err) {
-        console.error('Stream URL error:', err);
+        log.error('Stream URL error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -564,7 +565,7 @@ router.get('/epg/:sourceId', async (req, res) => {
 
         res.json(data);
     } catch (err) {
-        console.error('EPG proxy error:', err);
+        log.error('EPG proxy error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -615,7 +616,7 @@ router.post('/epg/:sourceId/channels', async (req, res) => {
 
         res.json(result);
     } catch (err) {
-        console.error('EPG channels error:', err);
+        log.error('EPG channels error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -635,6 +636,7 @@ router.get('/stream', async (req, res) => {
             if (!url) {
                 return res.status(400).json({ error: 'URL required' });
             }
+            const elapsed = log.timer();
 
             // Forward some headers to be more "transparent" back to the origin
             // Pluto TV uses multiple domains for content delivery
@@ -660,16 +662,16 @@ router.get('/stream', async (req, res) => {
 
             // Retry on 5xx errors (transient upstream issues)
             if (response.status >= 500 && attempt < maxRetries) {
-                console.log(`[Proxy] Upstream 5xx error (attempt ${attempt}/${maxRetries}), retrying in 500ms...`);
+                log.debug(`[Proxy] Upstream 5xx error (attempt ${attempt}/${maxRetries}), retrying in 500ms...`);
                 await new Promise(r => setTimeout(r, 500));
                 continue;
             }
 
             if (!response.ok) {
-                console.error(`Upstream error for ${url.substring(0, 80)}...: ${response.status} ${response.statusText}`);
+                log.error(`Upstream error for ${url.substring(0, 80)}...: ${response.status} ${response.statusText}`);
                 if (response.status === 403) {
                     const errorBody = await response.text().catch(() => 'N/A');
-                    console.error(`403 Response body: ${errorBody.substring(0, 200)}`);
+                    log.error(`403 Response body: ${errorBody.substring(0, 200)}`);
                 }
                 return res.status(response.status).send(`Failed to fetch stream: ${response.statusText}`);
             }
@@ -727,7 +729,7 @@ router.get('/stream', async (req, res) => {
 
                 const buffer = Buffer.concat(chunks);
                 const finalUrl = response.url || url;
-                console.log(`[Proxy] Processing HLS manifest from: ${finalUrl.substring(0, 80)}...`);
+                log.debug(`[Proxy] Processing HLS manifest from: ${finalUrl.substring(0, 80)}...`);
                 res.set('Content-Type', 'application/vnd.apple.mpegurl');
 
                 let manifest = buffer.toString('utf-8');
@@ -769,7 +771,7 @@ router.get('/stream', async (req, res) => {
             }
 
             // Binary content (Video Segment or Key): Collect and send
-            console.log(`[Proxy] Serving binary content (${contentType})`);
+            log.debug(`[Proxy] Serving binary content (${contentType})`);
             res.set('Content-Type', contentType || 'application/octet-stream');
 
             // For small files (like encryption keys), collect all data and send at once
@@ -785,13 +787,14 @@ router.get('/stream', async (req, res) => {
             // Set Content-Length for proper client handling
             res.set('Content-Length', fullContent.length);
             res.send(fullContent);
+            log.debug(`[Proxy] ${req.method} ${req.path} completed in ${elapsed()}ms`);
             return; // Success - exit the retry loop
 
         } catch (err) {
             lastError = err;
-            console.error(`Stream proxy error (attempt ${attempt}/${maxRetries}):`, err.message);
+            log.error(`Stream proxy error (attempt ${attempt}/${maxRetries}):`, err.message);
             if (attempt < maxRetries) {
-                console.log('[Proxy] Retrying after error...');
+                log.debug('[Proxy] Retrying after error...');
                 await new Promise(r => setTimeout(r, 500));
                 continue;
             }
@@ -843,7 +846,7 @@ router.get('/image', async (req, res) => {
         }
 
     } catch (err) {
-        console.error('Image proxy error:', err.message);
+        log.error('Image proxy error:', err.message);
         res.status(500).send('Image proxy error');
     }
 });
@@ -868,9 +871,9 @@ async function warmDbCache() {
                 cache.set('xtream', sid, `db_series_streams_all_${h}`,  getStreamsFromDb(sid, 'series', null, includeHidden));
             }
         }
-        console.log(`[Cache] DB cache warmed for ${enabled.length} source(s)`);
+        log.info(`[Cache] DB cache warmed for ${enabled.length} source(s)`);
     } catch (err) {
-        console.error('[Cache] DB cache warm failed:', err.message);
+        log.error('[Cache] DB cache warm failed:', err.message);
     }
 }
 

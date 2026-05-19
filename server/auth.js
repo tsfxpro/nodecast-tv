@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const passport = require('passport');
+const log = require('./utils/logger');
 const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const { Strategy: LocalStrategy } = require('passport-local');
 
@@ -134,7 +135,7 @@ function configureSessionSerialization(getUserById) {
  */
 function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
     if (!process.env.OIDC_ISSUER_URL || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
-        console.warn('OIDC configuration missing - SSO disabled');
+        log.warn('OIDC configuration missing - SSO disabled');
         return;
     }
 

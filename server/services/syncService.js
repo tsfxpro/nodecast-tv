@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const { getDb } = require('../db/sqlite');
 const { sources, settings } = require('../db'); // For source config and settings
 const xtreamApi = require('./xtreamApi');
@@ -46,7 +47,7 @@ class SyncService {
                     error     = excluded.error
             `).run(Date.now());
         } catch (err) {
-            console.warn('[Sync] Failed to persist last sync time:', err.message);
+            log.warn('[Sync] Failed to persist last sync time:', err.message);
         }
     }
 
@@ -62,7 +63,7 @@ class SyncService {
             ).get();
             if (row && row.last_sync) return new Date(row.last_sync);
         } catch (err) {
-            console.warn('[Sync] Failed to load last sync time:', err.message);
+            log.warn('[Sync] Failed to load last sync time:', err.message);
         }
         return null;
     }
@@ -79,7 +80,7 @@ class SyncService {
         const intervalHours = parseInt(currentSettings.epgRefreshInterval) || 24;
 
         if (intervalHours <= 0) {
-            console.log('[Sync] Auto-sync disabled (manual only mode)');
+            log.info('[Sync] Auto-sync disabled (manual only mode)');
             this.stopSyncTimer();
             this._currentInterval = 0;
             return;
@@ -89,7 +90,7 @@ class SyncService {
 
         // Don't restart if interval hasn't changed and timer is already running
         if (this._currentInterval === intervalHours && this._syncTimer) {
-            console.log(`[Sync] Timer already running for ${intervalHours} hours, not restarting`);
+            log.debug(`[Sync] Timer already running for ${intervalHours} hours, not restarting`);
             return;
         }
 
@@ -106,9 +107,9 @@ class SyncService {
         // Kick off the repeating interval (called after the first fire)
         const startInterval = () => {
             this._syncTimer = setInterval(async () => {
-                console.log('[Sync] Scheduled sync triggered');
+                log.info('[Sync] Scheduled sync triggered');
                 await this.syncAll();
-                console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
+                log.info(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
             }, intervalMs);
             this._currentInterval = intervalHours;
         };
@@ -116,22 +117,22 @@ class SyncService {
         if (remaining <= 0) {
             // Overdue or first-ever run — sync immediately
             const reason = this.lastSyncTime ? 'overdue' : 'no prior sync found';
-            console.log(`[Sync] Running startup sync (${reason})...`);
+            log.info(`[Sync] Running startup sync (${reason})...`);
             await this.syncAll();
-            console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
+            log.info(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
             startInterval();
         } else {
             // Resume the countdown from where it left off
             const elapsedMin = Math.round(elapsed / 60000);
-            console.log(`[Sync] Skipping startup sync — last sync was ${elapsedMin}m ago`);
-            console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + remaining).toLocaleString()}`);
+            log.info(`[Sync] Skipping startup sync — last sync was ${elapsedMin}m ago`);
+            log.info(`[Sync] Next scheduled sync at: ${new Date(Date.now() + remaining).toLocaleString()}`);
             this._currentInterval = intervalHours;
             // setTimeout and setInterval share the same clearInterval/clearTimeout in Node,
             // so stopSyncTimer() will cancel this correctly if settings change.
             this._syncTimer = setTimeout(async () => {
-                console.log('[Sync] Scheduled sync triggered');
+                log.info('[Sync] Scheduled sync triggered');
                 await this.syncAll();
-                console.log(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
+                log.info(`[Sync] Next scheduled sync at: ${new Date(Date.now() + intervalMs).toLocaleString()}`);
                 startInterval();
             }, remaining);
         }
@@ -159,7 +160,7 @@ class SyncService {
      * Sync all enabled sources
      */
     async syncAll() {
-        console.log('[Sync] Starting global sync...');
+        log.info('[Sync] Starting global sync...');
         try {
             const allSources = await sources.getAll();
             for (const source of allSources) {
@@ -170,12 +171,12 @@ class SyncService {
             }
             this.lastSyncTime = new Date();
             this._persistLastSyncTime();
-            console.log('[Sync] Global sync completed at', this.lastSyncTime.toISOString());
+            log.info('[Sync] Global sync completed at', this.lastSyncTime.toISOString());
             for (const fn of this._postSyncCallbacks) {
-                await Promise.resolve(fn()).catch(err => console.warn('[Sync] Post-sync callback failed:', err.message));
+                await Promise.resolve(fn()).catch(err => log.warn('[Sync] Post-sync callback failed:', err.message));
             }
         } catch (err) {
-            console.error('[Sync] Global sync failed:', err);
+            log.error('[Sync] Global sync failed:', err);
         }
     }
 
@@ -184,7 +185,7 @@ class SyncService {
      */
     async syncSource(sourceId) {
         if (activeSyncs.has(sourceId)) {
-            console.log(`[Sync] Source ${sourceId} is already syncing`);
+            log.debug(`[Sync] Source ${sourceId} is already syncing`);
             return;
         }
 
@@ -198,10 +199,10 @@ class SyncService {
                 throw new Error(`Source ${sourceId} not found`);
             }
 
-            console.log(`[Sync] Starting sync for source ${source.name} (ID: ${sourceId})`);
+            log.info(`[Sync] Starting sync for source ${source.name} (ID: ${sourceId})`);
 
             if (!source.enabled) {
-                console.log(`[Sync] Skipping disabled source ${source.name}`);
+                log.debug(`[Sync] Skipping disabled source ${source.name}`);
                 activeSyncs.delete(sourceId);
                 return;
             }
@@ -218,10 +219,10 @@ class SyncService {
             }
 
             this.updateSyncStatus(sourceId, 'all', 'success');
-            console.log(`[Sync] Completed sync for source ${source.name}`);
+            log.info(`[Sync] Completed sync for source ${source.name}`);
 
         } catch (err) {
-            console.error(`[Sync] Failed sync for source ${sourceId}:`, err);
+            log.error(`[Sync] Failed sync for source ${sourceId}:`, err);
             this.updateSyncStatus(sourceId, 'all', 'error', err.message);
         } finally {
             activeSyncs.delete(sourceId);
@@ -252,43 +253,43 @@ class SyncService {
         const db = getDb();
 
         // 1. Live Categories
-        console.log(`[Sync] Fetching Live Categories for ${source.name}`);
+        log.info(`[Sync] Fetching Live Categories for ${source.name}`);
         const liveCats = await api.getLiveCategories();
         await this.saveCategories(source.id, 'live', liveCats);
 
         // 2. Live Streams
-        console.log(`[Sync] Fetching Live Streams for ${source.name}`);
+        log.info(`[Sync] Fetching Live Streams for ${source.name}`);
         const liveStreams = await api.getLiveStreams();
         await this.saveStreams(source.id, 'live', liveStreams);
 
         // 3. VOD Categories
-        console.log(`[Sync] Fetching VOD Categories for ${source.name}`);
+        log.info(`[Sync] Fetching VOD Categories for ${source.name}`);
         const vodCats = await api.getVodCategories();
         await this.saveCategories(source.id, 'movie', vodCats);
 
         // 4. VOD Streams
-        console.log(`[Sync] Fetching VOD Streams for ${source.name}`);
+        log.info(`[Sync] Fetching VOD Streams for ${source.name}`);
         const vodStreams = await api.getVodStreams();
         await this.saveStreams(source.id, 'movie', vodStreams);
 
         // 5. Series Categories
-        console.log(`[Sync] Fetching Series Categories for ${source.name}`);
+        log.info(`[Sync] Fetching Series Categories for ${source.name}`);
         const seriesCats = await api.getSeriesCategories();
         await this.saveCategories(source.id, 'series', seriesCats);
 
         // 6. Series
-        console.log(`[Sync] Fetching Series for ${source.name}`);
+        log.info(`[Sync] Fetching Series for ${source.name}`);
         const series = await api.getSeries();
         await this.saveStreams(source.id, 'series', series);
 
         // 7. EPG (Xmltv)
         // Try to fetch XMLTV if available
-        console.log(`[Sync] Fetching EPG for ${source.name}`);
+        log.info(`[Sync] Fetching EPG for ${source.name}`);
         try {
             const xmltvUrl = api.getXmltvUrl();
             await this.syncEpgFromUrl(source.id, xmltvUrl);
         } catch (e) {
-            console.warn('[Sync] XMLTV fetch failed, skipping EPG sync for now:', e.message);
+            log.warn('[Sync] XMLTV fetch failed, skipping EPG sync for now:', e.message);
         }
     }
 
@@ -297,7 +298,7 @@ class SyncService {
      */
     async saveCategories(sourceId, type, categories) {
         if (!categories || categories.length === 0) return;
-        console.log(`[Sync] Saving ${categories.length} ${type} categories for source ${sourceId}...`);
+        log.info(`[Sync] Saving ${categories.length} ${type} categories for source ${sourceId}...`);
         const db = getDb();
         const stmt = db.prepare(`
             INSERT INTO categories (id, source_id, category_id, type, name, parent_id, data)
@@ -324,7 +325,7 @@ class SyncService {
             await new Promise(resolve => setImmediate(resolve));
         }
 
-        console.log(`[Sync] Saved ${categories.length} ${type} categories`);
+        log.info(`[Sync] Saved ${categories.length} ${type} categories`);
     }
 
     /**
@@ -423,7 +424,7 @@ class SyncService {
             await this.purgeStaleItems(sourceId, type, syncedIds);
         }
 
-        console.log(`[Sync] Saved ${items.length} ${type} items`);
+        log.info(`[Sync] Saved ${items.length} ${type} items`);
         return syncedIds;
     }
 
@@ -456,7 +457,7 @@ class SyncService {
         const deleted = deleteStmt.run(sourceId, type);
 
         if (deleted.changes > 0) {
-            console.log(`[Sync] Purged ${deleted.changes} stale ${type} items`);
+            log.info(`[Sync] Purged ${deleted.changes} stale ${type} items`);
         }
     }
 
@@ -466,12 +467,12 @@ class SyncService {
      * Processes EPG files in batches to avoid OOM on large EPG data
      */
     async syncEpgFromUrl(sourceId, url) {
-        console.log(`[Sync] Fetching EPG from: ${url.substring(0, 60)}...`);
+        log.info(`[Sync] Fetching EPG from: ${url.substring(0, 60)}...`);
 
         // Temporary memory logging for verification
         const logMemory = () => {
             const used = process.memoryUsage();
-            console.log(`[Sync] Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB heap`);
+            log.debug(`[Sync] Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB heap`);
         };
 
         logMemory();
@@ -520,7 +521,7 @@ class SyncService {
 
             // Log progress every 10 batches
             if (batchCount % 10 === 0) {
-                console.log(`[Sync] Processed ${totalProgrammes} programmes so far...`);
+                log.debug(`[Sync] Processed ${totalProgrammes} programmes so far...`);
                 logMemory();
             }
 
@@ -528,7 +529,7 @@ class SyncService {
             await new Promise(resolve => setImmediate(resolve));
         }
 
-        console.log(`[Sync] EPG Parsed: ${allChannels.length} channels, ${totalProgrammes} programmes`);
+        log.info(`[Sync] EPG Parsed: ${allChannels.length} channels, ${totalProgrammes} programmes`);
         logMemory();
 
         // Save EPG Channels
@@ -563,10 +564,10 @@ class SyncService {
             });
 
             insertChannels(allChannels);
-            console.log(`[Sync] Saved ${allChannels.length} EPG channels`);
+            log.info(`[Sync] Saved ${allChannels.length} EPG channels`);
         }
 
-        console.log(`[Sync] Saved ${totalProgrammes} programmes`);
+        log.info(`[Sync] Saved ${totalProgrammes} programmes`);
     }
 
     /**
@@ -574,12 +575,12 @@ class SyncService {
      * Processes M3U files in batches to avoid OOM on large playlists
      */
     async syncM3u(source) {
-        console.log(`[Sync] Fetching M3U playlist for ${source.name}`);
+        log.info(`[Sync] Fetching M3U playlist for ${source.name}`);
 
         // Temporary memory logging for verification
         const logMemory = () => {
             const used = process.memoryUsage();
-            console.log(`[Sync] Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB heap`);
+            log.debug(`[Sync] Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB heap`);
         };
 
         logMemory();
@@ -615,12 +616,12 @@ class SyncService {
 
             // Log progress every 10 batches
             if (batchCount % 10 === 0) {
-                console.log(`[Sync] Processed ${totalChannels} channels so far...`);
+                log.debug(`[Sync] Processed ${totalChannels} channels so far...`);
                 logMemory();
             }
         }
 
-        console.log(`[Sync] M3U Parsed: ${totalChannels} channels, ${allGroups.size} groups`);
+        log.info(`[Sync] M3U Parsed: ${totalChannels} channels, ${allGroups.size} groups`);
         logMemory();
 
         // Purge stale items after all batches are complete
@@ -636,14 +637,14 @@ class SyncService {
         }));
 
         await this.saveCategories(source.id, 'live', categories);
-        console.log(`[Sync] M3U sync complete for ${source.name}`);
+        log.info(`[Sync] M3U sync complete for ${source.name}`);
     }
 
     /**
      * EPG Source Sync Logic
      */
     async syncEpg(source) {
-        console.log(`[Sync] Fetching standalone EPG for ${source.name}`);
+        log.info(`[Sync] Fetching standalone EPG for ${source.name}`);
         await this.syncEpgFromUrl(source.id, source.url);
     }
 }

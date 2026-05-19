@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { settings, getDefaultSettings } = require('../db');
 const syncService = require('../services/syncService');
+const log = require('../utils/logger');
 
 /**
  * Get all settings
@@ -12,7 +13,7 @@ router.get('/', async (req, res) => {
         const currentSettings = await settings.get();
         res.json(currentSettings);
     } catch (err) {
-        console.error('Error getting settings:', err);
+        log.error('Error getting settings:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -28,12 +29,12 @@ router.put('/', async (req, res) => {
 
         // If sync interval changed, restart the server-side sync timer
         if (updates.epgRefreshInterval !== undefined) {
-            syncService.restartSyncTimer().catch(console.error);
+            syncService.restartSyncTimer().catch(err => log.error('restartSyncTimer error:', err));
         }
 
         res.json(updatedSettings);
     } catch (err) {
-        console.error('Error updating settings:', err);
+        log.error('Error updating settings:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -47,7 +48,7 @@ router.delete('/', async (req, res) => {
         const defaultSettings = await settings.reset();
         res.json(defaultSettings);
     } catch (err) {
-        console.error('Error resetting settings:', err);
+        log.error('Error resetting settings:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -87,7 +88,7 @@ router.get('/hw-info', async (req, res) => {
 
         res.json(capabilities);
     } catch (err) {
-        console.error('Error getting hardware info:', err);
+        log.error('Error getting hardware info:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -102,7 +103,7 @@ router.post('/hw-info/refresh', async (req, res) => {
         const capabilities = await hwDetect.refresh();
         res.json(capabilities);
     } catch (err) {
-        console.error('Error refreshing hardware info:', err);
+        log.error('Error refreshing hardware info:', err);
         res.status(500).json({ error: err.message });
     }
 });

@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
@@ -32,8 +33,8 @@ router.get('/', async (req, res) => {
     const settings = await db.settings.get();
     const userAgent = db.getUserAgent(settings);
 
-    console.log(`[Remux] Starting remux for: ${url}`);
-    console.log(`[Remux] Using User-Agent: ${settings.userAgentPreset}`);
+    log.info(`[Remux] Starting remux for: ${url}`);
+    log.debug(`[Remux] Using User-Agent: ${settings.userAgentPreset}`);
 
     // FFmpeg arguments for pure remux (no encoding)
     // Very lightweight - just changes container from TS to fragmented MP4
@@ -85,13 +86,13 @@ router.get('/', async (req, res) => {
         '-' // Output to stdout
     ];
 
-    console.log(`[Remux] Full command: ${ffmpegPath} ${args.join(' ')}`);
+    log.debug(`[Remux] Full command: ${ffmpegPath} ${args.join(' ')}`);
 
     let ffmpeg;
     try {
         ffmpeg = spawn(ffmpegPath, args);
     } catch (spawnErr) {
-        console.error('[Remux] Failed to spawn FFmpeg:', spawnErr);
+        log.error('[Remux] Failed to spawn FFmpeg:', spawnErr);
         return res.status(500).json({ error: 'FFmpeg spawn failed', details: spawnErr.message });
     }
 
@@ -108,17 +109,14 @@ router.get('/', async (req, res) => {
     // Log stderr (useful for debugging)
     ffmpeg.stderr.on('data', (data) => {
         const msg = data.toString();
-        // Only log warnings/errors, not progress
-        if (msg.includes('Warning') || msg.includes('Error') || msg.includes('error')) {
-            console.log(`[Remux FFmpeg] ${msg}`);
-        }
+        log.debug(`[Remux FFmpeg] ${msg}`);
     });
 
     // Cleanup on client disconnect (normal path: user closed the tab / changed channel).
     // Guard with sessionId so a stale close from an old request doesn't unregister a
     // newer session that has already taken over for this clientIp.
     req.on('close', () => {
-        console.log('[Remux] Client disconnected, killing FFmpeg process');
+        log.debug('[Remux] Client disconnected, killing FFmpeg process');
         ffmpeg.kill('SIGKILL');
         liveStreamManager.unregisterIfCurrent(clientIp, sessionId);
     });
@@ -127,13 +125,13 @@ router.get('/', async (req, res) => {
     ffmpeg.on('exit', (code) => {
         liveStreamManager.unregisterIfCurrent(clientIp, sessionId);
         if (code !== null && code !== 0 && code !== 255) {
-            console.error(`[Remux] FFmpeg exited with code ${code}`);
+            log.error(`[Remux] FFmpeg exited with code ${code}`);
         }
     });
 
     // Handle spawn errors
     ffmpeg.on('error', (err) => {
-        console.error('[Remux] Failed to spawn FFmpeg:', err);
+        log.error('[Remux] Failed to spawn FFmpeg:', err);
         if (!res.headersSent) {
             res.status(500).json({ error: 'Remux failed to start' });
         }

@@ -1,4 +1,5 @@
 require('../fetch-patch.cjs'); // Route all fetch() through VPN proxy + scrub proxy-revealing headers
+const log = require('./utils/logger');
 const express = require('express');
 require('dotenv').config();
 const path = require('path');
@@ -17,6 +18,18 @@ app.set('trust proxy', true);
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
+
+// Log all API requests at DEBUG level — method, path, status, time, payload size
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const ms = Date.now() - start;
+        const bytes = res.getHeader('content-length');
+        const size = bytes ? `${(bytes / 1024).toFixed(1)}kb` : '-';
+        log.debug(`[API] ${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms ${size}`);
+    });
+    next();
+});
 
 // Initialize Passport
 const session = require('express-session');
@@ -40,7 +53,7 @@ function findFFmpeg() {
     // Try system FFmpeg first (better Docker compatibility)
     try {
         execSync('ffmpeg -version', { stdio: 'ignore' });
-        console.log('FFmpeg binary configured at: ffmpeg (system)');
+        log.info('FFmpeg binary configured at: ffmpeg (system)');
         return 'ffmpeg';
     } catch (e) {
         // System FFmpeg not found, try ffmpeg-static
@@ -54,11 +67,11 @@ function findFFmpeg() {
         if (ffmpegPath && ffmpegPath.includes('app.asar')) {
             ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
         }
-        console.log('FFmpeg binary configured at:', ffmpegPath);
+        log.info('FFmpeg binary configured at:', ffmpegPath);
         return ffmpegPath;
     } catch (err) {
-        console.warn('FFmpeg not available - transcoding/remuxing will be disabled.');
-        console.warn('Install FFmpeg via your package manager or npm install ffmpeg-static');
+        log.warn('FFmpeg not available - transcoding/remuxing will be disabled.');
+        log.warn('Install FFmpeg via your package manager or npm install ffmpeg-static');
         return null;
     }
 }
@@ -67,7 +80,7 @@ function findFFprobe() {
     // Try system ffprobe first
     try {
         execSync('ffprobe -version', { stdio: 'ignore' });
-        console.log('FFprobe binary configured at: ffprobe (system)');
+        log.info('FFprobe binary configured at: ffprobe (system)');
         return 'ffprobe';
     } catch (e) {
         // Not found in system
@@ -77,14 +90,14 @@ function findFFprobe() {
     try {
         const ffprobePath = require('@ffprobe-installer/ffprobe').path;
         if (ffprobePath) {
-            console.log('FFprobe binary configured at:', ffprobePath);
+            log.info('FFprobe binary configured at:', ffprobePath);
             return ffprobePath;
         }
     } catch (err) {
         // Package not available
     }
 
-    console.warn('FFprobe not available - auto transcode will fallback to always transcode');
+    log.warn('FFprobe not available - auto transcode will fallback to always transcode');
     return null;
 }
 
@@ -102,11 +115,11 @@ try {
         try {
             services[name] = require(path.join(servicesDir, file));
         } catch (e) {
-            console.warn(`Failed to load service ${file}:`, e.message);
+            log.warn(`Failed to load service ${file}:`, e.message);
         }
     }
 } catch (e) {
-    console.warn('No services directory found or failed to read services:', e.message);
+    log.warn('No services directory found or failed to read services:', e.message);
 }
 
 // Freeze services object to prevent plugins from mutating shared state
@@ -136,35 +149,35 @@ async function loadPlugins() {
                         // Direct function export (sync or async)
                         await plugin(app, services);
                         loadedPlugins.push({ name: file, plugin: null });
-                        console.log(`✓ Loaded plugin: ${file}`);
+                        log.info(`✓ Loaded plugin: ${file}`);
                     } else if (plugin && typeof plugin.init === 'function') {
                         // Object export with init/shutdown lifecycle
                         await plugin.init(app, services);
                         loadedPlugins.push({ name: file, plugin });
-                        console.log(`✓ Loaded plugin: ${file} (with lifecycle hooks)`);
+                        log.info(`✓ Loaded plugin: ${file} (with lifecycle hooks)`);
                     } else {
-                        console.warn(`⚠ Plugin ${file} does not export a function or object with init(), skipping.`);
+                        log.warn(`⚠ Plugin ${file} does not export a function or object with init(), skipping.`);
                     }
                 } catch (err) {
-                    console.error(`✗ Failed to load plugin ${file}:`, err);
+                    log.error(`✗ Failed to load plugin ${file}:`, err);
                 }
             }
         }
     } catch (err) {
-        console.warn('Plugin loader failed:', err.message);
+        log.warn('Plugin loader failed:', err.message);
     }
 }
 
 // Graceful shutdown handler for plugins with shutdown hooks
 process.on('SIGTERM', async () => {
-    console.log('SIGTERM received, shutting down plugins...');
+    log.info('SIGTERM received, shutting down plugins...');
     for (const { name, plugin } of loadedPlugins) {
         if (plugin && typeof plugin.shutdown === 'function') {
             try {
                 await plugin.shutdown();
-                console.log(`✓ Shutdown plugin: ${name}`);
+                log.info(`✓ Shutdown plugin: ${name}`);
             } catch (err) {
-                console.error(`✗ Error shutting down plugin ${name}:`, err);
+                log.error(`✗ Error shutting down plugin ${name}:`, err);
             }
         }
     }
@@ -200,20 +213,20 @@ app.get('*', (req, res) => {
 
 // Error handling
 app.use((err, req, res, next) => {
-    console.error('Server error:', err);
+    log.error('Server error:', err);
     res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(PORT, async () => {
-    console.log(`NodeCast TV server running on http://localhost:${PORT}`);
+    log.info(`NodeCast TV server running on http://localhost:${PORT}`);
 
     // Load plugins
     await loadPlugins().catch(err => {
-        console.error('Plugin initialization failed:', err);
+        log.error('Plugin initialization failed:', err);
     });
 
     // Warm DB cache from existing data immediately (before sync)
-    proxyRouter.warmDbCache().catch(err => console.warn('[Cache] Startup warm failed:', err.message));
+    proxyRouter.warmDbCache().catch(err => log.warn('[Cache] Startup warm failed:', err.message));
     channelsRouter.warmRecentCache();
     historyRouter.warmChannelsCache();
 
@@ -228,14 +241,14 @@ app.listen(PORT, async () => {
     // startSyncTimer() will sync immediately if overdue, or resume the countdown
     // from the last completed sync — no unconditional full sync on every restart.
     setTimeout(async () => {
-        await syncService.startSyncTimer().catch(console.error);
+        await syncService.startSyncTimer().catch(log.error);
 
         // Detect hardware acceleration capabilities
         try {
             const hwDetect = require('./services/hwDetect');
             await hwDetect.detect();
         } catch (err) {
-            console.warn('Hardware detection failed:', err.message);
+            log.warn('Hardware detection failed:', err.message);
         }
     }, 5000);
 });

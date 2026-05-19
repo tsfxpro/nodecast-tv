@@ -2,12 +2,13 @@
  * Example plugin demonstrating async initialization and service access
  * This plugin registers a test route at /api/hello
  */
+const log = require('../utils/logger');
 module.exports = async function (app, services) {
-    console.log("Plugin 'Hello' activated!");
+    log.info("Plugin 'Hello' activated!");
 
     // Example: Access loaded services
     if (services.syncService) {
-        console.log("   - syncService is available");
+        log.info("   - syncService is available");
     }
 
     // Simulate async initialization (e.g., database connection, API setup)
@@ -21,5 +22,5 @@ module.exports = async function (app, services) {
         });
     });
 
-    console.log("   - Registered route: GET /api/hello");
+    log.info("   - Registered route: GET /api/hello");
 };

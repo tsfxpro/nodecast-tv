@@ -1269,13 +1269,22 @@ class SourceManager {
             try {
                 const statuses = await API.sources.getStatus();
                 this.updateSyncStatus(statuses);
+                // Fast poll (3s) only while a sync is actively running, otherwise 30s
+                const syncing = Array.isArray(statuses) && statuses.some(s => s.status === 'syncing');
+                this.syncPollTimeout = setTimeout(poll, syncing ? 3000 : 30000);
             } catch (err) {
                 console.warn('Error polling sync status:', err);
+                this.syncPollTimeout = setTimeout(poll, 30000);
             }
-            // Poll every 3 seconds
-            this.syncPollTimeout = setTimeout(poll, 3000);
         };
         poll();
+    }
+
+    stopSyncStatusPoll() {
+        if (this.syncPollTimeout) {
+            clearTimeout(this.syncPollTimeout);
+            this.syncPollTimeout = null;
+        }
     }
 
     /**

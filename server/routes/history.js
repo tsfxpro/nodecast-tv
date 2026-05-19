@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/sqlite');
@@ -32,9 +33,9 @@ function warmChannelsCache() {
         for (const { user_id } of users) {
             recentChannelsCache.set(user_id, { data: queryRecentChannels(user_id, 10), timestamp: Date.now() });
         }
-        console.log(`[Cache] Recent channels cache warmed for ${users.length} user(s)`);
+        log.info(`[Cache] Recent channels cache warmed for ${users.length} user(s)`);
     } catch (err) {
-        console.error('[Cache] Recent channels cache warm failed:', err.message);
+        log.warn('[Cache] Recent channels cache warm failed:', err.message);
     }
 }
 
@@ -54,7 +55,7 @@ router.get('/channels', (req, res) => {
         recentChannelsCache.set(userId, { data: rows, timestamp: Date.now() });
         res.json(rows);
     } catch (err) {
-        console.error('[History] Error fetching recent channels:', err);
+        log.error('[History] Error fetching recent channels:', err);
         res.status(500).json({ error: 'Failed to fetch recent channels' });
     }
 });
@@ -81,7 +82,7 @@ router.get('/', (req, res) => {
 
         res.json(history);
     } catch (err) {
-        console.error('[History] Error fetching history:', err);
+        log.error('[History] Error fetching history:', err);
         res.status(500).json({ error: 'Failed to fetch history' });
     }
 });
@@ -130,7 +131,7 @@ router.post('/', (req, res) => {
         if (type === 'live') recentChannelsCache.delete(userId);
         res.json({ success: true, timestamp });
     } catch (err) {
-        console.error('[History] Error saving progress:', err);
+        log.error('[History] Error saving progress:', err);
         res.status(500).json({ error: 'Failed to save progress' });
     }
 });
@@ -156,7 +157,7 @@ router.delete('/:itemId', (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
-        console.error('[History] Error deleting history item:', err);
+        log.error('[History] Error deleting history item:', err);
         res.status(500).json({ error: 'Failed to delete history item' });
     }
 });

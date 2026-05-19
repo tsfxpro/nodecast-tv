@@ -11,6 +11,7 @@
 
 const { execSync, exec } = require('child_process');
 const os = require('os');
+const log = require('../utils/logger');
 
 // Cache detection results
 let hwCapabilities = null;
@@ -32,8 +33,8 @@ async function detectNvidia() {
     try {
         // Query GPU info via nvidia-smi
         const result = execSync(
-            'nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader',
-            { timeout: 5000, encoding: 'utf-8', windowsHide: true }
+            'nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null',
+            { timeout: 5000, encoding: 'utf-8', windowsHide: true, shell: true }
         );
 
         const lines = result.trim().split('\n');
@@ -58,8 +59,8 @@ async function detectNvidia() {
             }
         }
 
-        console.log(`[HwDetect] NVIDIA GPU detected: ${gpuName} (compute ${computeCap})`);
-        console.log(`[HwDetect] NVDEC supported codecs: ${supportedCodecs.join(', ')}`);
+        log.info(`[HwDetect] NVIDIA GPU detected: ${gpuName} (compute ${computeCap})`);
+        log.info(`[HwDetect] NVDEC supported codecs: ${supportedCodecs.join(', ')}`);
 
         return {
             available: true,
@@ -71,7 +72,7 @@ async function detectNvidia() {
         };
     } catch (err) {
         // nvidia-smi not found or no GPU
-        console.log('[HwDetect] No NVIDIA GPU detected');
+        log.info('[HwDetect] No NVIDIA GPU detected');
         return { available: false };
     }
 }
@@ -100,7 +101,7 @@ async function detectVAAPI() {
 
         // Use first available device
         const device = devices[0];
-        console.log(`[HwDetect] VAAPI device found: ${device}`);
+        log.info(`[HwDetect] VAAPI device found: ${device}`);
 
         return {
             available: true,
@@ -109,7 +110,7 @@ async function detectVAAPI() {
             decoder: 'vaapi'
         };
     } catch (err) {
-        console.log('[HwDetect] VAAPI not available');
+        log.info('[HwDetect] VAAPI not available');
         return { available: false };
     }
 }
@@ -133,7 +134,7 @@ async function detectQuickSync() {
         } else if (os.platform() === 'linux') {
             // Linux: Check lspci
             try {
-                const result = execSync('lspci | grep -i "vga\\|display" | grep -i intel', {
+                const result = execSync('lspci 2>/dev/null | grep -i "vga\\|display" | grep -i intel', {
                     timeout: 5000,
                     encoding: 'utf-8',
                     shell: true
@@ -148,7 +149,7 @@ async function detectQuickSync() {
             return { available: false, reason: 'No Intel GPU found' };
         }
 
-        console.log('[HwDetect] Intel GPU detected, QSV may be available');
+        log.info('[HwDetect] Intel GPU detected, QSV may be available');
 
         return {
             available: true,
@@ -156,7 +157,7 @@ async function detectQuickSync() {
             decoder: 'h264_qsv'
         };
     } catch (err) {
-        console.log('[HwDetect] QuickSync not available');
+        log.info('[HwDetect] QuickSync not available');
         return { available: false };
     }
 }
@@ -196,7 +197,7 @@ async function detectAMF() {
             }
         }
 
-        console.log(`[HwDetect] AMD GPU detected: ${gpuName}`);
+        log.info(`[HwDetect] AMD GPU detected: ${gpuName}`);
 
         return {
             available: true,
@@ -205,7 +206,7 @@ async function detectAMF() {
             decoder: 'h264'  // AMF has limited decode support, often uses software
         };
     } catch (err) {
-        console.log('[HwDetect] AMF not available');
+        log.info('[HwDetect] AMF not available');
         return { available: false };
     }
 }
@@ -219,7 +220,7 @@ async function detect() {
         return hwCapabilities;
     }
 
-    console.log('[HwDetect] Probing hardware acceleration capabilities...');
+    log.info('[HwDetect] Probing hardware acceleration capabilities...');
 
     const [nvidia, vaapi, qsv, amf] = await Promise.all([
         detectNvidia(),
@@ -250,7 +251,7 @@ async function detect() {
         detectedAt: new Date().toISOString()
     };
 
-    console.log(`[HwDetect] Recommended encoder: ${recommended}`);
+    log.info(`[HwDetect] Recommended encoder: ${recommended}`);
 
     return hwCapabilities;
 }

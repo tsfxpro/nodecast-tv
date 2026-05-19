@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const log = require('../utils/logger');
 
 // Cache directory
 const cacheDir = path.join(__dirname, '..', '..', 'data', 'cache');
@@ -51,7 +52,7 @@ function get(type, sourceId, key, maxAgeMs) {
 
         return cached.data;
     } catch (err) {
-        console.warn(`Cache read error for ${type}/${sourceId}/${key}:`, err.message);
+        log.warn(`Cache read error for ${type}/${sourceId}/${key}:`, err.message);
         return null;
     }
 }
@@ -72,7 +73,7 @@ function set(type, sourceId, key, data) {
         };
         fs.writeFileSync(cachePath, JSON.stringify(cached));
     } catch (err) {
-        console.error(`Cache write error for ${type}/${sourceId}/${key}:`, err.message);
+        log.error(`Cache write error for ${type}/${sourceId}/${key}:`, err.message);
     }
 }
 
@@ -86,7 +87,7 @@ function clear(type, sourceId, key) {
             fs.unlinkSync(cachePath);
         }
     } catch (err) {
-        console.warn(`Cache clear error:`, err.message);
+        log.warn(`Cache clear error:`, err.message);
     }
 }
 
@@ -103,7 +104,7 @@ function clearSource(sourceId) {
             }
         }
     } catch (err) {
-        console.warn(`Cache clear source error:`, err.message);
+        log.warn(`Cache clear source error:`, err.message);
     }
 }
 
@@ -116,7 +117,7 @@ function clearAll() {
             fs.rmSync(cacheDir, { recursive: true });
         }
     } catch (err) {
-        console.warn(`Cache clear all error:`, err.message);
+        log.warn(`Cache clear all error:`, err.message);
     }
 }
 

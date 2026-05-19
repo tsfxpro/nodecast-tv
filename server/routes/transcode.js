@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
@@ -40,6 +41,7 @@ router.post('/session', async (req, res) => {
     const settings = await db.settings.get();
     const userAgent = db.getUserAgent(settings);
 
+    const elapsed = log.timer();
     try {
         const session = await transcodeSession.createSession(url, {
             ffmpegPath,
@@ -69,6 +71,7 @@ router.post('/session', async (req, res) => {
             return res.status(500).json({ error: 'Transcoding failed to start', reason: 'Playlist not generated in time' });
         }
 
+        log.info(`[Transcode] Session ready in ${elapsed()}ms`);
         res.json({
             sessionId: session.id,
             playlistUrl: `/api/transcode/${session.id}/stream.m3u8`,
@@ -77,7 +80,7 @@ router.post('/session', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('[Transcode] Session creation failed:', err);
+        log.error('[Transcode] Session creation failed:', err);
         res.status(500).json({ error: 'Failed to create session', details: err.message });
     }
 });
@@ -177,9 +180,9 @@ router.get('/', async (req, res) => {
     const settings = await db.settings.get();
     const userAgent = db.getUserAgent(settings);
 
-    console.log(`[Transcode] Starting transcoding for: ${url}`);
-    console.log(`[Transcode] Using User-Agent: ${settings.userAgentPreset}`);
-    console.log(`[Transcode] Using binary: ${ffmpegPath}`);
+    log.info(`[Transcode] Starting transcoding for: ${url}`);
+    log.debug(`[Transcode] Using User-Agent: ${settings.userAgentPreset}`);
+    log.debug(`[Transcode] Using binary: ${ffmpegPath}`);
 
     // FFmpeg arguments for transcoding
     // Optimized for VOD content with incompatible audio (Dolby/AC3/EAC3)
@@ -233,13 +236,13 @@ router.get('/', async (req, res) => {
         '-' // Output to stdout
     ];
 
-    console.log(`[Transcode] Full command: ${ffmpegPath} ${args.join(' ')}`);
+    log.debug(`[Transcode] Full command: ${ffmpegPath} ${args.join(' ')}`);
 
     let ffmpeg;
     try {
         ffmpeg = spawn(ffmpegPath, args);
     } catch (spawnErr) {
-        console.error('[Transcode] Failed to spawn FFmpeg:', spawnErr);
+        log.error('[Transcode] Failed to spawn FFmpeg:', spawnErr);
         return res.status(500).json({ error: 'FFmpeg spawn failed', details: spawnErr.message });
     }
 
@@ -257,25 +260,25 @@ router.get('/', async (req, res) => {
     ffmpeg.stderr.on('data', (data) => {
         const msg = data.toString();
         stderrBuffer += msg;
-        console.log(`[FFmpeg] ${msg}`);
+        log.debug(`[FFmpeg] ${msg}`);
     });
 
     // Cleanup on client disconnect
     req.on('close', () => {
-        console.log('[Transcode] Client disconnected, killing FFmpeg process');
+        log.debug('[Transcode] Client disconnected, killing FFmpeg process');
         ffmpeg.kill('SIGKILL');
     });
 
     // Handle process exit
     ffmpeg.on('exit', (code) => {
         if (code !== null && code !== 0 && code !== 255) { // 255 is often returned on kill
-            console.error(`[Transcode] FFmpeg exited with code ${code}`);
+            log.error(`[Transcode] FFmpeg exited with code ${code}`);
         }
     });
 
     // Handle spawn errors
     ffmpeg.on('error', (err) => {
-        console.error('[Transcode] Failed to spawn FFmpeg:', err);
+        log.error('[Transcode] Failed to spawn FFmpeg:', err);
         if (!res.headersSent) {
             res.status(500).json({ error: 'Transcoding failed to start' });
         }

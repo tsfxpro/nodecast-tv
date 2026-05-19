@@ -1,4 +1,5 @@
 'use strict';
+const log = require('./server/utils/logger');
 
 // Required as the first import in server/index.js, before all other modules.
 // Ensures every outbound fetch() call:
@@ -32,12 +33,12 @@ try {
   if (proxyUrl) {
     setGlobalDispatcher(new ProxyAgent(proxyUrl));
     _configuredProxyUrl = proxyUrl;
-    console.log('[fetch-patch] fetch() routed through proxy:', proxyUrl);
+    log.debug('[fetch-patch] fetch() routed through proxy:', proxyUrl);
   } else {
-    console.warn('[fetch-patch] WARNING: no HTTP_PROXY set — fetch() will use DIRECT connections');
+    log.warn('[fetch-patch] WARNING: no HTTP_PROXY set — fetch() will use DIRECT connections');
   }
 } catch (e) {
-  console.warn('[fetch-patch] WARNING: undici ProxyAgent setup failed — fetch() may use DIRECT connections:', e.message);
+  log.warn('[fetch-patch] WARNING: undici ProxyAgent setup failed — fetch() may use DIRECT connections:', e.message);
 }
 
 // Patch globalThis.fetch to enforce clean outbound headers on every call.
@@ -63,12 +64,12 @@ if (typeof _origFetch === 'function') {
       const url = typeof input === 'string' ? input : (input?.url || String(input));
       const host = new URL(url).host;
       if (!host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('streaming-internal')) {
-        console.log(`[fetch-patch] fetch ${host} via ${_configuredProxyUrl ? 'proxy' : 'DIRECT'}`);
+        log.debug(`[fetch-patch] fetch ${host} via ${_configuredProxyUrl ? 'proxy' : 'DIRECT'}`);
       }
     } catch (_) {}
 
     return _origFetch.call(this, input, opts);
   };
 } else {
-  console.warn('[fetch-patch] WARNING: globalThis.fetch not available — header scrubbing disabled');
+  log.warn('[fetch-patch] WARNING: globalThis.fetch not available — header scrubbing disabled');
 }

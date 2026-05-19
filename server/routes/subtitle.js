@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
@@ -53,7 +54,7 @@ router.get('/', (req, res) => {
     });
 
     ffmpeg.on('error', (err) => {
-        console.error('[Subtitle] Failed to spawn FFmpeg:', err);
+        log.error('[Subtitle] Failed to spawn FFmpeg:', err);
         if (!res.headersSent) {
             res.status(500).send('Subtitle extraction failed');
         }

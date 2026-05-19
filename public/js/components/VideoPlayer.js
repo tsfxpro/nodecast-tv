@@ -263,6 +263,14 @@ class VideoPlayer {
             this.loadingSpinner?.classList.remove('show');
         });
 
+        // When video actually starts playing, transition transcoding/remuxing badges to green
+        this.video.addEventListener('playing', () => {
+            const el = document.getElementById('player-transcode-status');
+            if (el && (el.classList.contains('transcoding') || el.classList.contains('remuxing') || el.classList.contains('upscaling'))) {
+                this.updateTranscodeStatus('ready', this._readyStatusText || 'Trans');
+            }
+        });
+
         // Mute/Volume
         const updateVolumeUI = () => {
             const isMuted = this.video.muted || this.video.volume === 0;
@@ -1247,6 +1255,15 @@ class VideoPlayer {
 
         el.textContent = text || mode;
         el.classList.add(mode);
+
+        // Pre-compute a short label for when video starts playing and badge goes green
+        if (mode === 'transcoding' || mode === 'remuxing' || mode === 'upscaling') {
+            if (mode === 'upscaling') this._readyStatusText = 'Upscale';
+            else if (mode === 'remuxing') this._readyStatusText = 'Remux';
+            else if (text?.includes('Audio')) this._readyStatusText = 'Trans Audio';
+            else if (text?.includes('Video')) this._readyStatusText = 'Trans Video';
+            else this._readyStatusText = 'Trans';
+        }
 
         // Ensure it's visible
         el.classList.remove('hidden');

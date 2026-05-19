@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/sqlite');
@@ -44,9 +45,9 @@ function warmRecentCache() {
         for (const type of ['movie', 'series']) {
             setRecentCached(type, 12, queryRecent(type, 12));
         }
-        console.log('[Cache] Recent items cache warmed');
+        log.info('[Cache] Recent items cache warmed');
     } catch (err) {
-        console.error('[Cache] Recent items cache warm failed:', err.message);
+        log.warn('[Cache] Recent items cache warm failed:', err.message);
     }
 }
 
@@ -111,7 +112,7 @@ router.get('/hidden', async (req, res) => {
 
         res.json(hidden);
     } catch (err) {
-        console.error('Error getting hidden items:', err);
+        log.error('Error getting hidden items:', err);
         res.status(500).json({ error: 'Failed to get hidden items' });
     }
 });
@@ -137,7 +138,7 @@ router.post('/hide', async (req, res) => {
         clearRecentCache();
         res.json({ success: true });
     } catch (err) {
-        console.error('Error hiding item:', err);
+        log.error('Error hiding item:', err);
         res.status(500).json({ error: 'Failed to hide item' });
     }
 });
@@ -163,7 +164,7 @@ router.post('/show', async (req, res) => {
         clearRecentCache();
         res.json({ success: true });
     } catch (err) {
-        console.error('Error showing item:', err);
+        log.error('Error showing item:', err);
         res.status(500).json({ error: 'Failed to show item' });
     }
 });
@@ -185,7 +186,7 @@ router.get('/hidden/check', async (req, res) => {
 
         res.json({ hidden: !!(row && row.is_hidden) });
     } catch (err) {
-        console.error('Error checking hidden:', err);
+        log.error('Error checking hidden:', err);
         res.status(500).json({ error: 'Failed to check status' });
     }
 });
@@ -229,7 +230,7 @@ router.post('/hide/bulk', async (req, res) => {
         if (err.code === 'SQLITE_BUSY') {
             return res.status(503).json({ error: 'Database is busy, please try again' });
         }
-        console.error('Error bulk hide:', err);
+        log.error('Error bulk hide:', err);
         res.status(500).json({ error: 'Failed' });
     }
 });
@@ -273,7 +274,7 @@ router.post('/show/bulk', async (req, res) => {
         if (err.code === 'SQLITE_BUSY') {
             return res.status(503).json({ error: 'Database is busy, please try again' });
         }
-        console.error('Error bulk show:', err);
+        log.error('Error bulk show:', err);
         res.status(500).json({ error: 'Failed' });
     }
 });
@@ -300,11 +301,11 @@ router.post('/show/all', async (req, res) => {
             itemCount += itemResult.changes;
         }
 
-        console.log(`[Channels] Show all for source ${sourceId} (${contentType}): ${catCount} categories, ${itemCount} items`);
+        log.debug(`[Channels] Show all for source ${sourceId} (${contentType}): ${catCount} categories, ${itemCount} items`);
         clearRecentCache();
         res.json({ success: true, categoriesUpdated: catCount, itemsUpdated: itemCount });
     } catch (err) {
-        console.error('Error show all:', err);
+        log.error('Error show all:', err);
         res.status(500).json({ error: 'Failed to show all' });
     }
 });
@@ -331,11 +332,11 @@ router.post('/hide/all', async (req, res) => {
             itemCount += itemResult.changes;
         }
 
-        console.log(`[Channels] Hide all for source ${sourceId} (${contentType}): ${catCount} categories, ${itemCount} items`);
+        log.debug(`[Channels] Hide all for source ${sourceId} (${contentType}): ${catCount} categories, ${itemCount} items`);
         clearRecentCache();
         res.json({ success: true, categoriesUpdated: catCount, itemsUpdated: itemCount });
     } catch (err) {
-        console.error('Error hide all:', err);
+        log.error('Error hide all:', err);
         res.status(500).json({ error: 'Failed to hide all' });
     }
 });
@@ -356,7 +357,7 @@ router.get('/recent', async (req, res) => {
         setRecentCached(type, parsedLimit, formatted);
         res.json(formatted);
     } catch (err) {
-        console.error(`Error getting recent ${req.query.type}:`, err);
+        log.error(`Error getting recent ${req.query.type}:`, err);
         res.status(500).json({ error: 'Failed to get recent items' });
     }
 });

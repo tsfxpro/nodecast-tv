@@ -1,3 +1,4 @@
+const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
@@ -59,7 +60,7 @@ function probeStream(url, ffprobePath, userAgent = null, timeout = 15000) {
             args.unshift('-http_proxy', httpProxy);
         }
 
-        console.log(`[Probe] ffprobe proxy=${httpProxy || 'DIRECT'} ${args.slice(-5).join(' ')}`);
+        log.debug(`[Probe] ffprobe proxy=${httpProxy || 'DIRECT'} ${args.slice(-5).join(' ')}`);
         const proc = spawn(ffprobePath, args);
         let stdout = '';
         let stderr = '';
@@ -170,7 +171,7 @@ router.get('/', async (req, res) => {
 
     if (!ffprobePath) {
         // No ffprobe available - assume needs transcoding to be safe
-        console.log('[Probe] FFprobe not available, assuming transcode needed');
+        log.warn('[Probe] FFprobe not available, assuming transcode needed');
         return res.json({
             video: 'unknown',
             audio: 'unknown',
@@ -184,11 +185,12 @@ router.get('/', async (req, res) => {
     // Check cache
     const cached = probeCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
-        console.log(`[Probe] Cache hit for: ${url.substring(0, 50)}...`);
+        log.debug(`[Probe] Cache hit: ${url.substring(0, 50)}... (served from cache)`);
         return res.json(cached.result);
     }
 
-    console.log(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
+    log.info(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
+    const elapsed = log.timer();
 
     try {
         const probeResult = await probeStream(url, ffprobePath, ua);
@@ -197,13 +199,13 @@ router.get('/', async (req, res) => {
         // Cache result
         probeCache.set(cacheKey, { result: analysis, timestamp: Date.now() });
 
-        console.log(`[Probe] Result: video=${analysis.video}, audio=${analysis.audio}, ` +
+        log.info(`[Probe] Result: video=${analysis.video}, audio=${analysis.audio}, ` +
             `container=${analysis.container}, compatible=${analysis.compatible}, ` +
-            `needsRemux=${analysis.needsRemux}, needsTranscode=${analysis.needsTranscode}`);
+            `needsRemux=${analysis.needsRemux}, needsTranscode=${analysis.needsTranscode} (${elapsed()}ms)`);
 
         res.json(analysis);
     } catch (err) {
-        console.error('[Probe] Failed:', err.message);
+        log.error('[Probe] Failed:', err.message);
 
         // 458 = provider concurrent-stream limit. Return a distinct error so the player
         // can stop immediately instead of launching ffmpeg sessions that will also 458.

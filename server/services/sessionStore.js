@@ -1,5 +1,6 @@
 const { Store } = require('express-session');
 const { getDb } = require('../db/sqlite');
+const log = require('../utils/logger');
 
 // Prune expired sessions every 15 minutes
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
@@ -53,7 +54,7 @@ class SqliteSessionStore extends Store {
         try {
             getDb().prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
         } catch (err) {
-            console.warn('[Sessions] Prune failed:', err.message);
+            log.warn('[Sessions] Prune failed:', err.message);
         }
     }
 }

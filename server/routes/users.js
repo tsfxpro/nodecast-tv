@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const auth = require('../auth');
+const log = require('../utils/logger');
 
 /**
  * Get all users (admin only)
@@ -72,7 +73,7 @@ router.post('/', auth.requireAuth, auth.requireAdmin, async (req, res) => {
             createdAt: newUser.createdAt
         });
     } catch (err) {
-        console.error('Create user error:', err);
+        log.error('Create user error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -138,7 +139,7 @@ router.put('/:id', auth.requireAuth, auth.requireAdmin, async (req, res) => {
             createdAt: user.createdAt
         });
     } catch (err) {
-        console.error('Update user error:', err);
+        log.error('Update user error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -178,7 +179,7 @@ router.delete('/:id', auth.requireAuth, auth.requireAdmin, async (req, res) => {
         
         res.json({ success: true });
     } catch (err) {
-        console.error('Delete user error:', err);
+        log.error('Delete user error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
