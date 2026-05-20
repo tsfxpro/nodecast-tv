@@ -3,6 +3,9 @@ const router = express.Router();
 const { settings, getDefaultSettings } = require('../db');
 const syncService = require('../services/syncService');
 const log = require('../utils/logger');
+const { requireAuth } = require('../auth');
+
+router.use(requireAuth);
 
 /**
  * Get all settings

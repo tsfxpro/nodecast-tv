@@ -1,7 +1,10 @@
 const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../auth');
 const { getDb } = require('../db/sqlite');
+
+router.use(requireAuth);
 
 // 25h matches the proxy DB_CACHE_TTL — data only changes on sync cycles
 const RECENT_CACHE_TTL = 25 * 60 * 60 * 1000;

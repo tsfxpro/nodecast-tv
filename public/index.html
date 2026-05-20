@@ -3,6 +3,30 @@
 
 <head>
   <meta charset="UTF-8">
+  <script>
+    // Auth gate — runs before any CSS/JS is fetched. Redirect unauthenticated users immediately.
+    (function () {
+      // Handle SSO ?token= callback first so we don't bounce a fresh SSO login
+      var p = new URLSearchParams(window.location.search);
+      var urlToken = p.get('token');
+      if (urlToken) {
+        localStorage.setItem('authToken', urlToken);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+      var token = localStorage.getItem('authToken');
+      if (!token) { window.location.replace('/login.html'); return; }
+      try {
+        var payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          localStorage.removeItem('authToken');
+          window.location.replace('/login.html');
+        }
+      } catch (e) {
+        localStorage.removeItem('authToken');
+        window.location.replace('/login.html');
+      }
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1110,20 +1134,7 @@
   <script src="/js/pages/Settings.js?v=2"></script>
   <script src="/js/pages/WatchPage.js?v=1"></script>
   <script src="/js/app.js?v=4"></script>
-  <script>
-    // Check for SSO token in URL
-    (function () {
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token');
-      if (token) {
-        console.log('SSO Login successful, saving token...');
-        localStorage.setItem('authToken', token);
-        // Clean URL without reloading
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, newUrl);
-      }
-    })();
-  </script>
+
 </body>
 
 </html>

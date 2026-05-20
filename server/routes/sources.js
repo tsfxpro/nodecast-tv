@@ -1,7 +1,10 @@
 const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../auth');
 const { sources } = require('../db');
+
+router.use(requireAuth);
 const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
 const syncService = require('../services/syncService');

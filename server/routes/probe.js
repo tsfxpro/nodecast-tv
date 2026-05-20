@@ -1,7 +1,10 @@
 const log = require('../utils/logger');
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../auth');
 const { spawn } = require('child_process');
+
+router.use(requireAuth);
 
 /**
  * Probe endpoint - detects stream codecs and container
