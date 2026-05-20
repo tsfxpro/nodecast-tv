@@ -1,10 +1,29 @@
 const express = require('express');
 const router = express.Router();
-const { favorites } = require('../db/sqlite');
+const { favorites, getDb } = require('../db/sqlite');
 const { requireAuth } = require('../auth');
 
 // All favorites routes require authentication
 router.use(requireAuth);
+
+// Get favorite channels with name+logo resolved via DB join (no full channel list load needed)
+router.get('/channels', (req, res) => {
+    try {
+        const rows = getDb().prepare(`
+            SELECT f.id, f.item_id, f.source_id, pi.name, pi.stream_icon
+            FROM favorites f
+            LEFT JOIN playlist_items pi
+                ON  pi.item_id   = f.item_id
+                AND pi.source_id = f.source_id
+                AND pi.type      = 'live'
+            WHERE f.user_id = ? AND f.item_type = 'channel'
+            ORDER BY f.created_at DESC
+        `).all(req.user.id);
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // Get all favorites for current user
 router.get('/', async (req, res) => {

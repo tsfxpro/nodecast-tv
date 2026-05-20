@@ -189,27 +189,26 @@ class HomePage {
         if (this.isLoading) return;
         this.isLoading = true;
 
+        // Fire all sections in parallel — each renders independently as its data arrives
+        await Promise.allSettled([
+            this.renderRecentChannels(),
+            this.renderFavoriteChannels(),
+            this.renderContinueWatching(),
+            this.renderRecentMovies(),
+            this.renderRecentSeries(),
+        ]);
+
+        this.isLoading = false;
+    }
+
+    async renderContinueWatching() {
         try {
-            // 0. Recently watched channels (top section — cached, loads fast)
-            await this.renderRecentChannels();
-
-            // 1. Load Favorite Channels
-            await this.renderFavoriteChannels();
-
-            // 1. Load Watch History
             const history = await window.API.request('GET', '/history?limit=12&excludeType=live');
             if (history && Array.isArray(history)) {
                 this.renderHistory(history);
             }
-
-            // 2. Load Recent Items
-            this.renderRecentMovies();
-            this.renderRecentSeries();
-
         } catch (err) {
-            console.error('[Dashboard] Error loading data:', err);
-        } finally {
-            this.isLoading = false;
+            console.error('[Dashboard] Error loading continue watching:', err);
         }
     }
 
@@ -253,54 +252,28 @@ class HomePage {
         if (!list || !section) return;
 
         try {
-            // Fetch favorite channels for current user
-            const favorites = await window.API.request('GET', '/favorites?itemType=channel');
+            // Enriched endpoint returns name+logo via DB join — no full channel list load needed
+            const channels = await window.API.request('GET', '/favorites/channels');
 
-            if (!favorites || favorites.length === 0) {
+            if (!channels || channels.length === 0) {
                 list.innerHTML = '<div class="empty-state hint">Add channels to favorites from Live TV</div>';
                 return;
             }
 
-            // Ensure channel list is loaded to resolve channel details
-            const channelList = this.app.channelList;
-            if (!channelList.channels || channelList.channels.length === 0) {
-                await channelList.loadSources();
-                await channelList.loadChannels();
-            }
+            list.innerHTML = channels.map(ch => this.createChannelTile({
+                id: ch.item_id,
+                sourceId: ch.source_id,
+                tvgLogo: ch.stream_icon,
+                name: ch.name
+            })).join('');
 
-            // Match favorites to channel data
-            const channels = [];
-            for (const fav of favorites) {
-                // Find channel in loaded channel list
-                const channel = channelList.channels.find(ch =>
-                    String(ch.sourceId) === String(fav.source_id) &&
-                    (String(ch.id) === String(fav.item_id) || String(ch.streamId) === String(fav.item_id))
-                );
-                if (channel) {
-                    channels.push({ ...channel, favoriteId: fav.id });
-                }
-            }
-
-            if (channels.length === 0) {
-                list.innerHTML = '<div class="empty-state hint">Add channels to favorites from Live TV</div>';
-                return;
-            }
-
-            // Render channel tiles
-            list.innerHTML = channels.map(ch => this.createChannelTile(ch)).join('');
-
-            // Attach click handlers
             list.querySelectorAll('.channel-tile').forEach(tile => {
                 tile.addEventListener('click', () => {
-                    const channelId = tile.dataset.channelId;
-                    const sourceId = tile.dataset.sourceId;
-                    this.playChannel(channelId, sourceId);
+                    this.playChannel(tile.dataset.channelId, tile.dataset.sourceId);
                 });
             });
 
-            // Update scroll arrows after content renders
             this.updateScrollArrows();
-
         } catch (err) {
             console.error('[Dashboard] Error loading favorite channels:', err);
             list.innerHTML = '<div class="empty-state hint">Error loading favorites</div>';
