@@ -19,6 +19,7 @@ class ChannelList {
         this._userExpandedGroups = new Set(); // Track groups user has explicitly expanded
         this.favorites = []; // Array of favorite objects
         this.visibleFavorites = new Set(); // Set<"sourceId:channelId">
+        this.recentChannels = []; // Array of {item_id, source_id} from watch history
         this.currentChannel = null;
         this.sources = [];
         this.isLoading = false;
@@ -332,16 +333,33 @@ class ChannelList {
             groupedChannels['Favorites'] = favoritedChannels;
         }
 
+        // 3b. Add Recently Watched (ordered by recency, max 10)
+        if (this.recentChannels.length > 0) {
+            const recentWatched = [];
+            for (const r of this.recentChannels) {
+                const ch = this.channels.find(c =>
+                    String(c.sourceId) === String(r.source_id) && String(c.streamId) === String(r.item_id)
+                );
+                if (ch) recentWatched.push(ch);
+                if (recentWatched.length >= 10) break;
+            }
+            if (recentWatched.length > 0) {
+                groupedChannels['Recently Watched'] = recentWatched;
+            }
+        }
+
         // 4. Sort Groups and filter to only those with visible channels
         const allGroups = Object.keys(groupedChannels).sort((a, b) => {
             if (a === 'Favorites') return -1;
             if (b === 'Favorites') return 1;
+            if (a === 'Recently Watched') return -1;
+            if (b === 'Recently Watched') return 1;
             return a.localeCompare(b);
         });
 
         // Pre-filter to only include groups with visible channels (so hidden groups don't consume batch slots)
         this.sortedGroups = allGroups.filter(groupName => {
-            if (groupName === 'Favorites') return true;
+            if (groupName === 'Favorites' || groupName === 'Recently Watched') return true;
             const channels = groupedChannels[groupName];
             // Check if any channel in this group is visible
             return channels.some(channel => {
@@ -358,7 +376,7 @@ class ChannelList {
         // This prevents rendering 100K+ channel items on initial load
         if (!this._hasCollapsedState && this.sortedGroups.length > 0) {
             this.sortedGroups.forEach(groupName => {
-                if (groupName !== 'Favorites') {
+                if (groupName !== 'Favorites' && groupName !== 'Recently Watched') {
                     this.collapsedGroups.add(groupName);
                 }
             });
@@ -370,10 +388,10 @@ class ChannelList {
         this.renderedChannels = [];
         this.sortedGroups.forEach(groupName => {
             const channels = this.groupedChannels[groupName];
-            const isFavoritesGroup = groupName === 'Favorites';
+            const isSpecialGroup = groupName === 'Favorites' || groupName === 'Recently Watched';
 
             const visibleChannels = channels.filter(channel => {
-                if (isFavoritesGroup) return true;
+                if (isSpecialGroup) return true;
                 const rawChannelId = channel.streamId || channel.id;
                 const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
                 return !channelHidden || this.showHidden;
@@ -450,11 +468,11 @@ class ChannelList {
             const channels = this.groupedChannels[groupName];
             if (channels.length === 0) continue;
 
-            const isFavoritesGroup = groupName === 'Favorites';
+            const isSpecialGroup = groupName === 'Favorites' || groupName === 'Recently Watched';
 
             // Pre-filter visible channels for this group
             const visibleChannels = channels.filter(channel => {
-                if (isFavoritesGroup) return true;
+                if (isSpecialGroup) return true;
                 const rawChannelId = channel.streamId || channel.id;
                 const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
                 return !channelHidden || this.showHidden;
@@ -463,15 +481,15 @@ class ChannelList {
             // Skip group if no visible channels (derived visibility)
             if (visibleChannels.length === 0) continue;
 
-            // Default new groups to collapsed (except Favorites)
+            // Default new groups to collapsed (except special groups)
             // This handles groups loaded via scroll that weren't in the initial collapse
-            if (!isFavoritesGroup && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
+            if (!isSpecialGroup && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
                 this.collapsedGroups.add(groupName);
             }
 
             html += `
         <div class="channel-group">
-          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${groupName}">
+          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${groupName === 'Favorites' ? 'favorites-group' : ''} ${groupName === 'Recently Watched' ? 'recently-watched-group' : ''}" data-group="${groupName}">
             <span class="group-toggle">${Icons.chevronDown}</span>
             <span class="group-name">${groupName}</span>
             <span class="group-count">${visibleChannels.length}</span>
@@ -490,7 +508,7 @@ class ChannelList {
             for (const channel of visibleChannels) {
                 // Check hidden again for styling (showHidden mode)
                 const rawChannelId = channel.streamId || channel.id;
-                const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
+                const channelHidden = !isSpecialGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
 
                 const isActive = this.currentChannel?.id === channel.id;
                 // Check if this specific instance is the "active" one for navigation purposes
@@ -590,11 +608,11 @@ class ChannelList {
         const channels = this.groupedChannels[groupName];
         if (!channels || channels.length === 0) return;
 
-        const isFavoritesGroup = groupName === 'Favorites';
+        const isSpecialGroup = groupName === 'Favorites' || groupName === 'Recently Watched';
 
         // Filter visible channels
         const visibleChannels = channels.filter(channel => {
-            if (isFavoritesGroup) return true;
+            if (isSpecialGroup) return true;
             const rawChannelId = channel.streamId || channel.id;
             const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
             return !channelHidden || this.showHidden;
@@ -603,7 +621,7 @@ class ChannelList {
         let html = '';
         for (const channel of visibleChannels) {
             const rawChannelId = channel.streamId || channel.id;
-            const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
+            const channelHidden = !isSpecialGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
             const isActive = this.currentChannel?.id === channel.id;
             const isFavorite = this.isFavorite(channel.sourceId, channel.id);
 
@@ -725,10 +743,11 @@ class ChannelList {
                 await this.loadM3uChannels(parseInt(id));
             }
 
-            // Load hidden items and favorites
+            // Load hidden items, favorites, and recent channels
             await Promise.all([
                 this.loadHiddenItems(),
-                this.loadFavorites()
+                this.loadFavorites(),
+                this.loadRecentChannels()
             ]);
 
             this.render();
@@ -764,7 +783,8 @@ class ChannelList {
 
             await Promise.all([
                 this.loadHiddenItems(),
-                this.loadFavorites()
+                this.loadFavorites(),
+                this.loadRecentChannels()
             ]);
             this.render();
         } catch (err) {
@@ -885,6 +905,19 @@ class ChannelList {
             );
         } catch (err) {
             console.error('Error loading favorites:', err);
+        }
+    }
+
+    /**
+     * Load recently watched channels (max 10, ordered by recency)
+     */
+    async loadRecentChannels() {
+        try {
+            const rows = await window.API.request('GET', '/history/channels?limit=10');
+            this.recentChannels = rows || [];
+        } catch (err) {
+            console.error('Error loading recent channels:', err);
+            this.recentChannels = [];
         }
     }
 

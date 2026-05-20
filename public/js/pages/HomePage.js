@@ -298,28 +298,37 @@ class HomePage {
     }
 
     playChannel(channelId, sourceId) {
-        // Navigate to Live TV and select the channel
         this.app.navigateTo('live');
 
-        // Small delay to ensure page is ready
-        setTimeout(() => {
+        const trySelect = (attempt = 0) => {
             const channelList = this.app.channelList;
-            if (channelList) {
-                // Find and select the channel
-                const channel = channelList.channels.find(ch =>
-                    String(ch.id) === String(channelId) && String(ch.sourceId) === String(sourceId)
-                );
-                if (channel) {
-                    channelList.selectChannel({
-                        channelId: channel.id,
-                        sourceId: channel.sourceId,
-                        sourceType: channel.sourceType,
-                        streamId: channel.streamId || '',
-                        url: channel.url || ''
-                    });
-                }
+            if (!channelList) return;
+
+            // Wait for channels to finish loading (up to 5s)
+            if (channelList.channels.length === 0 && attempt < 20) {
+                setTimeout(() => trySelect(attempt + 1), 250);
+                return;
             }
-        }, 100);
+
+            // Match by composite ID or raw stream ID (dashboard passes raw item_id)
+            const channel = channelList.channels.find(ch =>
+                String(ch.sourceId) === String(sourceId) && (
+                    String(ch.id) === String(channelId) ||
+                    String(ch.streamId) === String(channelId)
+                )
+            );
+            if (channel) {
+                channelList.selectChannel({
+                    channelId: channel.id,
+                    sourceId: channel.sourceId,
+                    sourceType: channel.sourceType,
+                    streamId: channel.streamId || '',
+                    url: channel.url || ''
+                });
+            }
+        };
+
+        setTimeout(() => trySelect(), 100);
     }
 
     renderHistory(items) {
