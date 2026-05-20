@@ -16,6 +16,8 @@ class HomePage {
     async show() {
         this.renderLayout();
         await this.loadDashboardData();
+        // EPG preload deferred until after home content is visible
+        this.app.epgGuide.preloadInBackground();
     }
 
     hide() {

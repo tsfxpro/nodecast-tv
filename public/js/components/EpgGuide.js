@@ -169,6 +169,22 @@ class EpgGuide {
     }
 
     /**
+     * Silently fetch EPG data into memory without touching the Guide UI.
+     * Called after the initial page content loads so it doesn't compete for bandwidth.
+     * Idempotent — skips if data is already loaded or a fetch is in progress.
+     */
+    preloadInBackground() {
+        if (this._preloadStarted || (this.programmes && this.programmes.length > 0)) return;
+        this._preloadStarted = true;
+        this.fetchEpgData(false).then(() => {
+            this.lastRefreshTime = new Date();
+            this.startBackgroundRefresh();
+        }).catch(() => {
+            this._preloadStarted = false; // allow retry
+        });
+    }
+
+    /**
      * Load EPG data (server-side caching)
      */
     async loadEpg(forceRefresh = false) {

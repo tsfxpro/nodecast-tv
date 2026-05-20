@@ -99,6 +99,9 @@ class LivePage {
             await this.app.channelList.loadSources();
             await this.app.channelList.loadChannels();
         }
+
+        // EPG preload deferred until after channels are visible
+        this.app.epgGuide.preloadInBackground();
     }
 
     hide() {
