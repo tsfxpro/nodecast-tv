@@ -13,6 +13,9 @@ const https = require('https');
 const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 const { Readable } = require('stream');
+const { promisify } = require('util');
+const { gzip } = require('zlib');
+const gzipAsync = promisify(gzip);
 
 // Default cache max age in hours
 const DEFAULT_MAX_AGE_HOURS = 24;
@@ -128,6 +131,14 @@ router.get('/xtream/:sourceId/live_streams', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
+        if (!categoryId) {
+            const gz = STREAM_GZIP_CACHE.get(`${sourceId}_db_live_${includeHidden}`);
+            if (gz && (Date.now() - gz.ts) < DB_CACHE_TTL && req.headers['accept-encoding']?.includes('gzip')) {
+                log.debug(`[Cache] hit db_live_streams_all_${includeHidden} (gz)`);
+                res.set('Content-Encoding', 'gzip').set('Content-Type', 'application/json').set('Content-Length', gz.gz.length);
+                return res.end(gz.gz);
+            }
+        }
         const cacheKey = `db_live_streams_${categoryId || 'all'}_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
         if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
@@ -163,6 +174,14 @@ router.get('/xtream/:sourceId/vod_streams', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
+        if (!categoryId) {
+            const gz = STREAM_GZIP_CACHE.get(`${sourceId}_db_vod_${includeHidden}`);
+            if (gz && (Date.now() - gz.ts) < DB_CACHE_TTL && req.headers['accept-encoding']?.includes('gzip')) {
+                log.debug(`[Cache] hit db_vod_streams_all_${includeHidden} (gz)`);
+                res.set('Content-Encoding', 'gzip').set('Content-Type', 'application/json').set('Content-Length', gz.gz.length);
+                return res.end(gz.gz);
+            }
+        }
         const cacheKey = `db_vod_streams_${categoryId || 'all'}_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
         if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
@@ -198,6 +217,14 @@ router.get('/xtream/:sourceId/series', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
+        if (!categoryId) {
+            const gz = STREAM_GZIP_CACHE.get(`${sourceId}_db_series_${includeHidden}`);
+            if (gz && (Date.now() - gz.ts) < DB_CACHE_TTL && req.headers['accept-encoding']?.includes('gzip')) {
+                log.debug(`[Cache] hit db_series_streams_all_${includeHidden} (gz)`);
+                res.set('Content-Encoding', 'gzip').set('Content-Type', 'application/json').set('Content-Length', gz.gz.length);
+                return res.end(gz.gz);
+            }
+        }
         const cacheKey = `db_series_streams_${categoryId || 'all'}_${includeHidden}`;
         const cached = cache.get('xtream', sourceId, cacheKey, DB_CACHE_TTL);
         if (cached) { log.debug(`[Cache] hit ${cacheKey}`); return res.json(cached); }
@@ -294,6 +321,40 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
 });
 
 
+// Helper to build the EPG response object from SQLite (shared by route + cache warm)
+function buildEpgResponse(sourceId) {
+    const db = getDb();
+    // 2h past so "currently airing" shows correctly; 24h future for the guide
+    const windowStart = Date.now() - (2 * 60 * 60 * 1000);
+    const windowEnd   = Date.now() + (24 * 60 * 60 * 1000);
+
+    const programs = db.prepare(`
+        SELECT channel_id as channelId, start_time, end_time, title, description
+        FROM epg_programs
+        WHERE source_id = ? AND end_time > ? AND start_time < ?
+    `).all(sourceId, windowStart, windowEnd);
+
+    const formattedPrograms = programs.map(p => ({
+        channelId: p.channelId,
+        start: new Date(p.start_time).toISOString(),
+        stop:  new Date(p.end_time).toISOString(),
+        title: p.title,
+        description: p.description
+    }));
+
+    const storedChannels = db.prepare(`
+        SELECT item_id as id, name, stream_icon as icon, data
+        FROM playlist_items
+        WHERE source_id = ? AND type = 'epg_channel'
+    `).all(sourceId);
+
+    const epgChannels = storedChannels.length > 0
+        ? storedChannels
+        : [...new Set(programs.map(p => p.channelId))].map(id => ({ id, name: id }));
+
+    return { channels: epgChannels, programmes: formattedPrograms };
+}
+
 // --- Other Proxy Routes --- //
 
 // M3U Playlist 
@@ -343,63 +404,55 @@ router.get('/m3u/:sourceId', async (req, res) => {
     }
 });
 
-// EPG
+// Pre-serialized + pre-gzip'd cache for large stream list endpoints
+// Key: `${sourceId}_${cachePrefix}_${includeHidden}` e.g. "6_db_vod_false"
+const STREAM_GZIP_CACHE = new Map();
+
+// EPG — pre-serialize + pre-compress to avoid per-request CPU overhead on a 60MB response
+const EPG_JSON_CACHE = new Map(); // sourceId → { json: string, gz: Buffer, ts: number }
+
 router.get('/epg/:sourceId', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
-        const db = getDb();
 
-        // Time window: 24 hours ago to 24 hours from now
-        // This prevents returning millions of rows and crashing the server/browser
-        const windowStart = Date.now() - (24 * 60 * 60 * 1000); // -24 hours
-        const windowEnd = Date.now() + (24 * 60 * 60 * 1000);   // +24 hours
-
-        // Fetch programs within the time window
-        let programsQuery = `
-            SELECT channel_id as channelId, start_time, end_time, title, description, data 
-            FROM epg_programs 
-            WHERE source_id = ? AND end_time > ? AND start_time < ?
-        `;
-        const params = [sourceId, windowStart, windowEnd];
-
-        const programs = db.prepare(programsQuery).all(...params);
-
-        const formattedPrograms = programs.map(p => ({
-            channelId: p.channelId,
-            start: new Date(p.start_time).toISOString(), // EpgGuide parse this back
-            stop: new Date(p.end_time).toISOString(),
-            title: p.title,
-            description: p.description
-        }));
-
-        // Fetch EPG channels from playlist_items (type='epg_channel')
-
-
-        let epgChannels = [];
-
-        // Try getting stored channels first
-        const storedChannels = db.prepare(`
-            SELECT item_id as id, name, stream_icon as icon, data 
-            FROM playlist_items 
-            WHERE source_id = ? AND type = 'epg_channel'
-        `).all(sourceId);
-
-        if (storedChannels.length > 0) {
-            epgChannels = storedChannels;
-        } else {
-            // Fallback: Build from unique channelIds in programmes (Legacy behavior)
-            const uniqueChannelIds = [...new Set(programs.map(p => p.channelId))];
-            epgChannels = uniqueChannelIds.map(id => ({
-                id: id,
-                name: id // Use channelId as name (fallback)
-            }));
+        const entry = EPG_JSON_CACHE.get(sourceId);
+        if (entry && (Date.now() - entry.ts) < DB_CACHE_TTL) {
+            const etag = `"${entry.ts}"`;
+            if (req.headers['if-none-match'] === etag) {
+                return res.status(304).end();
+            }
+            log.debug(`[Cache] hit db_epg_data`);
+            res.set('ETag', etag);
+            res.set('Cache-Control', 'public, max-age=3600');
+            const acceptsGzip = req.headers['accept-encoding']?.includes('gzip');
+            if (acceptsGzip && entry.gz) {
+                res.set('Content-Encoding', 'gzip');
+                res.set('Content-Type', 'application/json');
+                res.set('Content-Length', entry.gz.length);
+                return res.end(entry.gz);
+            }
+            res.set('Content-Type', 'application/json');
+            return res.end(entry.json);
         }
 
-        res.json({
-            channels: epgChannels,
-            programmes: formattedPrograms
-        });
+        const result = buildEpgResponse(sourceId);
+        const json = JSON.stringify(result);
+        const gz = await gzipAsync(Buffer.from(json));
+        const ts = Date.now();
+        EPG_JSON_CACHE.set(sourceId, { json, gz, ts });
 
+        const etag = `"${ts}"`;
+        res.set('ETag', etag);
+        res.set('Cache-Control', 'public, max-age=3600');
+        const acceptsGzip = req.headers['accept-encoding']?.includes('gzip');
+        if (acceptsGzip) {
+            res.set('Content-Encoding', 'gzip');
+            res.set('Content-Type', 'application/json');
+            res.set('Content-Length', gz.length);
+            return res.end(gz);
+        }
+        res.set('Content-Type', 'application/json');
+        res.end(json);
     } catch (err) {
         log.error(err);
         res.status(500).json({ error: 'Database error' });
@@ -853,27 +906,105 @@ router.get('/image', async (req, res) => {
 
 /**
  * Pre-populate DB cache for all enabled sources.
- * Call on startup and after each sync cycle.
+ * Fetches each type once (all rows including hidden), maps in one pass,
+ * then partitions into visible/all — avoids running 121k-row movie query twice.
+ * Movie and series warm in parallel (interleaved via setImmediate yields) so
+ * series (19k rows) completes ~4x sooner instead of waiting behind movies (121k rows).
  */
+async function warmOneType(sid, dbType, cachePrefix, db) {
+    const elapsed = log.timer();
+    const isSeries = dbType === 'series';
+
+    const rawCats = db.prepare(`
+        SELECT category_id, name as category_name, parent_id, is_hidden
+        FROM categories WHERE source_id = ? AND type = ? ORDER BY name ASC
+    `).all(sid, dbType);
+    const allCats = rawCats.map(({ is_hidden, ...c }) => c);
+    const visCats = rawCats.filter(c => !c.is_hidden).map(({ is_hidden, ...c }) => c);
+    cache.set('xtream', sid, `${cachePrefix}_cat_false`, visCats);
+    cache.set('xtream', sid, `${cachePrefix}_cat_true`,  allCats);
+
+    const stmt = db.prepare(`
+        SELECT item_id, name, stream_icon, added_at, rating,
+               container_extension, year, category_id, data, is_hidden
+        FROM playlist_items WHERE source_id = ? AND type = ?
+    `);
+
+    const allStreams = [];
+    let chunk = [];
+    for (const item of stmt.iterate(sid, dbType)) {
+        const data = JSON.parse(item.data || '{}');
+        chunk.push({
+            ...data,
+            stream_id: item.item_id,
+            series_id: isSeries ? item.item_id : undefined,
+            name: item.name,
+            stream_icon: item.stream_icon,
+            cover: item.stream_icon,
+            added: item.added_at,
+            rating: item.rating,
+            container_extension: item.container_extension,
+            category_id: item.category_id,
+            epg_channel_id: data.epg_channel_id || data.tvgId || null,
+            _h: item.is_hidden
+        });
+        if (chunk.length >= 5000) {
+            allStreams.push(...chunk);
+            chunk = [];
+            await new Promise(r => setImmediate(r));
+        }
+    }
+    allStreams.push(...chunk);
+
+    const hasHidden = allStreams.some(s => s._h);
+    const visStreams = hasHidden ? allStreams.filter(s => !s._h).map(({ _h, ...s }) => s) : allStreams.map(({ _h, ...s }) => s);
+    const allStreamsMapped = hasHidden ? allStreams.map(({ _h, ...s }) => s) : visStreams;
+    cache.set('xtream', sid, `${cachePrefix}_streams_all_false`, visStreams);
+    cache.set('xtream', sid, `${cachePrefix}_streams_all_true`,  allStreamsMapped);
+
+    const gzVis = await gzipAsync(Buffer.from(JSON.stringify(visStreams)));
+    const ts = Date.now();
+    STREAM_GZIP_CACHE.set(`${sid}_${cachePrefix}_false`, { gz: gzVis, ts });
+    STREAM_GZIP_CACHE.set(`${sid}_${cachePrefix}_true`,  { gz: hasHidden ? await gzipAsync(Buffer.from(JSON.stringify(allStreamsMapped))) : gzVis, ts });
+    log.debug(`[Cache] ${dbType} warmed: ${allStreams.length} items, ${(gzVis.length/1024).toFixed(0)}kb gzip in ${elapsed()}ms`);
+}
+
 async function warmDbCache() {
     try {
         const allSources = await sources.getAll();
         const enabled = allSources.filter(s => s.enabled);
+        const db = getDb();
+
         for (const source of enabled) {
             const sid = source.id;
-            for (const includeHidden of [false, true]) {
-                const h = String(includeHidden);
-                cache.set('xtream', sid, `db_live_cat_${h}`,            getCategoriesFromDb(sid, 'live',   includeHidden));
-                cache.set('xtream', sid, `db_live_streams_all_${h}`,    getStreamsFromDb(sid, 'live',   null, includeHidden));
-                cache.set('xtream', sid, `db_vod_cat_${h}`,             getCategoriesFromDb(sid, 'movie',  includeHidden));
-                cache.set('xtream', sid, `db_vod_streams_all_${h}`,     getStreamsFromDb(sid, 'movie',  null, includeHidden));
-                cache.set('xtream', sid, `db_series_cat_${h}`,          getCategoriesFromDb(sid, 'series', includeHidden));
-                cache.set('xtream', sid, `db_series_streams_all_${h}`,  getStreamsFromDb(sid, 'series', null, includeHidden));
-            }
+            // Ordered fast→slow: series (19k) before movies (121k) so the series
+            // page is usable within ~5s instead of waiting behind the 11s movie pass
+            await warmOneType(sid, 'live', 'db_live', db);
+            await warmOneType(sid, 'series', 'db_series', db);
+            await warmOneType(sid, 'movie', 'db_vod', db);
         }
+
         log.info(`[Cache] DB cache warmed for ${enabled.length} source(s)`);
+        warmEpgCache(enabled).catch(err => log.error('[Cache] EPG warm failed:', err.message));
     } catch (err) {
         log.error('[Cache] DB cache warm failed:', err.message);
+    }
+}
+
+async function warmEpgCache(enabledSources) {
+    for (const source of enabledSources) {
+        const sid = source.id;
+        const elapsed = log.timer();
+        try {
+            const result = buildEpgResponse(sid);
+            if (result.programmes.length === 0) continue;
+            const json = JSON.stringify(result);
+            const gz = await gzipAsync(Buffer.from(json));
+            EPG_JSON_CACHE.set(sid, { json, gz, ts: Date.now() });
+            log.info(`[Cache] EPG warmed for source ${sid}: ${result.programmes.length} programmes, ${(gz.length/1024).toFixed(0)}kb gzip in ${elapsed()}ms`);
+        } catch (err) {
+            log.error(`[Cache] EPG warm failed for source ${sid}:`, err.message);
+        }
     }
 }
 

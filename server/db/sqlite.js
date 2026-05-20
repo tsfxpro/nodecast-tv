@@ -17,9 +17,11 @@ function getDb() {
     if (!db) {
         log.info('[SQLite] Opening database at', dbPath);
         db = new Database(dbPath);
-        // Optimize performance
         db.pragma('journal_mode = WAL');
         db.pragma('synchronous = NORMAL');
+        db.pragma('cache_size = -65536');      // 64MB page cache
+        db.pragma('mmap_size = 1073741824'); // 1GB memory-mapped IO — covers full 836MB DB
+        db.pragma('temp_store = MEMORY');
         initSchema();
     }
     return db;
@@ -72,14 +74,14 @@ function initSchema() {
         );
         CREATE INDEX IF NOT EXISTS idx_items_source_type ON playlist_items(source_id, type);
         CREATE INDEX IF NOT EXISTS idx_items_category ON playlist_items(source_id, category_id);
+        CREATE INDEX IF NOT EXISTS idx_items_type_added ON playlist_items(type, is_hidden, added_at DESC);
     `);
 
     // EPG Programs
-    // Optimized for range queries
     db.exec(`
         CREATE TABLE IF NOT EXISTS epg_programs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            channel_id TEXT NOT NULL, -- matches playlist_items.id if possible, or mapping key
+            channel_id TEXT NOT NULL,
             source_id INTEGER NOT NULL,
             start_time INTEGER NOT NULL, -- Unix timestamp (ms)
             end_time INTEGER NOT NULL,   -- Unix timestamp (ms)
@@ -87,8 +89,9 @@ function initSchema() {
             description TEXT,
             data JSON
         );
+        CREATE INDEX IF NOT EXISTS idx_epg_source_time ON epg_programs(source_id, end_time, start_time);
         CREATE INDEX IF NOT EXISTS idx_epg_channel_time ON epg_programs(channel_id, start_time, end_time);
-        CREATE INDEX IF NOT EXISTS idx_epg_cleanup ON epg_programs(end_time); -- For deleting old programs
+        CREATE INDEX IF NOT EXISTS idx_epg_cleanup ON epg_programs(end_time);
     `);
 
     // Sync Status
@@ -144,6 +147,7 @@ function initSchema() {
         // Column already exists, ignore
     }
 
+    db.exec('ANALYZE');
     log.info('[SQLite] Schema initialized');
 }
 

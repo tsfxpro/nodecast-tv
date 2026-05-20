@@ -27,16 +27,12 @@ function queryRecent(type, limit) {
         SELECT * FROM playlist_items p
         WHERE p.type = ?
           AND p.is_hidden = 0
-          AND NOT EXISTS (
-              SELECT 1 FROM categories c
-              WHERE c.source_id = p.source_id
-                AND c.category_id = p.category_id
-                AND c.type = p.type
-                AND c.is_hidden = 1
+          AND p.category_id NOT IN (
+              SELECT category_id FROM categories WHERE type = ? AND is_hidden = 1
           )
         ORDER BY p.added_at DESC
         LIMIT ?
-    `).all(type, limit);
+    `).all(type, type, limit);
     return rows.map(item => ({ ...item, data: JSON.parse(item.data) }));
 }
 

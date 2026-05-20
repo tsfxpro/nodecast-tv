@@ -1,6 +1,7 @@
 require('../fetch-patch.cjs'); // Route all fetch() through VPN proxy + scrub proxy-revealing headers
 const log = require('./utils/logger');
 const express = require('express');
+const compression = require('compression');
 require('dotenv').config();
 const path = require('path');
 const passport = require('passport');
@@ -17,6 +18,15 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', true);
 
 // Middleware
+// Skip compression for routes that serve pre-gzip'd bytes directly
+app.use(compression({
+    filter: (req, res) => {
+        const u = req.originalUrl;
+        if (u.includes('/api/proxy/epg/')) return false;
+        if (u.includes('/live_streams') || u.includes('/vod_streams') || /\/series(\?|$)/.test(u)) return false;
+        return compression.filter(req, res);
+    }
+}));
 app.use(express.json({ limit: '50mb' }));
 
 // Log all API requests at DEBUG level — method, path, status, time, payload size
@@ -225,23 +235,29 @@ app.listen(PORT, async () => {
         log.error('Plugin initialization failed:', err);
     });
 
-    // Warm DB cache from existing data immediately (before sync)
-    proxyRouter.warmDbCache().catch(err => log.warn('[Cache] Startup warm failed:', err.message));
-    channelsRouter.warmRecentCache();
-    historyRouter.warmChannelsCache();
-
     // Re-warm DB cache after every sync cycle (timer-driven or manual)
     syncService.onSyncComplete(() => {
+        // Update query planner stats after bulk sync writes, then rebuild caches
+        require('./db/sqlite').getDb().exec('ANALYZE');
         proxyRouter.warmDbCache();
         channelsRouter.warmRecentCache();
         historyRouter.warmChannelsCache();
     });
 
     // Start sync timer after server settles.
-    // startSyncTimer() will sync immediately if overdue, or resume the countdown
-    // from the last completed sync — no unconditional full sync on every restart.
+    // If sync is overdue, startSyncTimer() runs it immediately and onSyncComplete
+    // handles cache warming. If no sync needed, warm from existing DB data here.
     setTimeout(async () => {
         await syncService.startSyncTimer().catch(log.error);
+        // If startSyncTimer ran a sync, lastSyncTime was just set (< 30s ago) and
+        // onSyncComplete already warmed the caches. Otherwise warm from existing DB data.
+        const lastSync = syncService.getLastSyncTime();
+        const syncJustRan = lastSync && (Date.now() - lastSync.getTime()) < 30000;
+        if (!syncJustRan) {
+            proxyRouter.warmDbCache().catch(err => log.warn('[Cache] Startup warm failed:', err.message));
+            channelsRouter.warmRecentCache();
+            historyRouter.warmChannelsCache();
+        }
 
         // Detect hardware acceleration capabilities
         try {
