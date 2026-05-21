@@ -338,9 +338,12 @@ class ChannelList {
             const recentWatched = [];
             for (const r of this.recentChannels) {
                 const ch = this.channels.find(c =>
-                    String(c.sourceId) === String(r.source_id) && String(c.streamId) === String(r.item_id)
+                    String(c.sourceId) === String(r.source_id) && (
+                        String(c.streamId) === String(r.item_id) ||
+                        String(c.id) === String(r.item_id)
+                    )
                 );
-                if (ch) recentWatched.push(ch);
+                if (ch && !recentWatched.includes(ch)) recentWatched.push(ch);
                 if (recentWatched.length >= 10) break;
             }
             if (recentWatched.length > 0) {
